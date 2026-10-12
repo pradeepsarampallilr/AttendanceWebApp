@@ -1,12 +1,14 @@
-import { pool } from "../db.js";
+import { And, LessThan, MoreThanOrEqual } from "typeorm";
+import { AppDataSource } from "../db.js";
 import { buildAttendanceDataset } from "../engine/dataset.js";
 import { carryoverFromEvents } from "../engine/movement.js";
 import { daysInMonth, mkDate, weekday, type DateStr } from "../engine/core.js";
-import { loadEvents, loadRoster, monthStart, refreshTransportOptIn, ts } from "./store.js";
+import { AttendanceVisit, AuditIssue, Leave, PublicHoliday, SwipeEvent, WednesdayAttendance } from "../models/index.js";
+import {
+  insertChunked, loadEvents, loadRoster, monthStart, monthUploadIds, nextMonthStart, refreshTransportOptIn, ts,
+} from "./store.js";
 
 export class NotFoundError extends Error {}
-
-const MONTH_UPLOAD = "upload_id IN (SELECT id FROM uploads WHERE kind = 'movement' AND month = $1)";
 
 export async function processMonth(ym: string) {
   const m = /^(\d{4})-(\d{2})$/.exec(ym);
@@ -14,28 +16,36 @@ export async function processMonth(ym: string) {
   const year = Number(m[1]), month = Number(m[2]);
   const ms = monthStart(year, month);
 
-  const currentEvents = await loadEvents(pool, MONTH_UPLOAD, [ms]);
+  const em = AppDataSource.manager;
+  const currentEvents = await loadEvents(em, { month: ms });
   if (!currentEvents.size) throw new NotFoundError(`No movement upload found for ${ym}`);
-  const { roster, unresolvedManagers } = await loadRoster(pool);
+  const { roster, unresolvedManagers } = await loadRoster(em);
   if (!roster.size) throw new NotFoundError("No roster uploaded yet");
 
   // Previous month's final-day swipes (pairing only), from whatever is already stored.
-  const { rows: [{ last }] } = await pool.query("SELECT max(at::date) AS last FROM swipe_events WHERE at < $1", [ms]);
-  const previousEvents = last
-    ? carryoverFromEvents(await loadEvents(pool, "at < $1", [ms]))
-    : new Map();
+  const last = await em.getRepository(SwipeEvent).createQueryBuilder("s")
+    .select("max(s.at)", "last").where("s.at < :ms", { ms }).getRawOne<{ last: string | null }>();
+  const previousEvents = last?.last ? carryoverFromEvents(await loadEvents(em, { before: ms })) : new Map();
 
-  const { rows: nameRows } = await pool.query(
-    `SELECT DISTINCT ON (employee_id) employee_id, employee_name FROM swipe_events
-     WHERE ${MONTH_UPLOAD} AND employee_name IS NOT NULL`, [ms]);
-  const fallbackNames = new Map<string, string>(nameRows.map((r) => [r.employee_id, r.employee_name]));
+  const nameQb = em.getRepository(SwipeEvent).createQueryBuilder("s")
+    .select("s.employeeId", "employeeId").addSelect("s.employeeName", "employeeName")
+    .distinctOn(["s.employeeId"]).orderBy("s.employeeId")
+    .where("s.employeeName IS NOT NULL");
+  nameQb.andWhere(`s.uploadId IN ${monthUploadIds(nameQb, ms)}`);
+  const fallbackNames = new Map<string, string>(
+    (await nameQb.getRawMany<{ employeeId: string; employeeName: string }>()).map((r) => [r.employeeId, r.employeeName]));
 
-  const { rows: holidayRows } = await pool.query(
-    "SELECT to_char(holiday_date, 'YYYY-MM-DD') AS d FROM public_holidays WHERE month = $1", [ms]);
-  const holidays = new Set<DateStr>(holidayRows.map((r) => r.d));
+  const holidays = new Set<DateStr>(
+    (await em.find(PublicHoliday, { where: { month: ms } })).map((h) => h.holidayDate));
+
+  const leaves = new Map<string, Set<DateStr>>();
+  for (const l of await em.find(Leave, { where: { leaveDate: And(MoreThanOrEqual(ms), LessThan(nextMonthStart(ms))) } })) {
+    if (!leaves.has(l.employeeId)) leaves.set(l.employeeId, new Set());
+    leaves.get(l.employeeId)!.add(l.leaveDate);
+  }
 
   const { rows, issues, attendedDates } = buildAttendanceDataset({
-    currentEvents, previousEvents, roster, year, month, fallbackNames, holidays });
+    currentEvents, previousEvents, roster, year, month, fallbackNames, holidays, leaves });
   if (unresolvedManagers.length) {
     issues.push({ employeeId: "-", issueType: "Manager email unresolved", at: new Date(),
       detail: "These managers are not present in the India shift roster, so their email could not be resolved (left blank): "
@@ -48,15 +58,13 @@ export async function processMonth(ym: string) {
     if (weekday(date) === 2) wednesdays.push(date);
   }
 
-  const db = await pool.connect();
-  try {
-    await db.query("BEGIN");
-    await db.query("DELETE FROM attendance_visits WHERE month = $1", [ms]);
-    await db.query("DELETE FROM audit_issues WHERE month = $1", [ms]);
-    await db.query("DELETE FROM wednesday_attendance WHERE month = $1", [ms]);
+  await AppDataSource.transaction(async (m) => {
+    await m.delete(AttendanceVisit, { month: ms });
+    await m.delete(AuditIssue, { month: ms });
+    await m.delete(WednesdayAttendance, { month: ms });
 
     const col = <T>(f: (r: (typeof rows)[number]) => T) => rows.map(f);
-    await db.query(
+    await m.query(
       `INSERT INTO attendance_visits (month, employee_id, employee_name, email, department, manager_name, manager_email,
          week, week_attended_days, work_date, check_in, check_out, visit_hours, daily_total_hours, is_first_row,
          rows_in_day_group, shift_label, eligibility, compliant, week_compliant, month_compliant)
@@ -70,27 +78,20 @@ export async function processMonth(ym: string) {
         col((r) => r.rowsInDayGroup), col((r) => r.shiftLabel), col((r) => r.eligibility), col((r) => r.compliant),
         col((r) => r.weekCompliant), col((r) => r.monthCompliant)]);
 
-    await refreshTransportOptIn(db, ms);
+    await refreshTransportOptIn(m, ms);
 
-    await db.query(
+    await m.query(
       `INSERT INTO audit_issues (month, employee_id, issue_type, at, detail)
        SELECT $1, * FROM unnest($2::text[], $3::text[], $4::timestamp[], $5::text[])`,
       [ms, issues.map((i) => i.employeeId), issues.map((i) => i.issueType), issues.map((i) => ts(i.at)), issues.map((i) => i.detail)]);
 
     const emps = [...roster.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    const wEmp: string[] = [], wName: string[] = [], wDate: string[] = [], wYes: boolean[] = [];
+    const wed: WednesdayAttendance[] = [];
     for (const e of emps) for (const w of wednesdays) {
-      wEmp.push(e.employeeId); wName.push(e.name); wDate.push(w); wYes.push(attendedDates.get(e.employeeId)?.has(w) ?? false);
+      wed.push(Object.assign(new WednesdayAttendance(), {
+        month: ms, employeeId: e.employeeId, employeeName: e.name, wednesday: w, attended: attendedDates.get(e.employeeId)?.has(w) ?? false }));
     }
-    await db.query(
-      `INSERT INTO wednesday_attendance (month, employee_id, employee_name, wednesday, attended)
-       SELECT $1, * FROM unnest($2::text[], $3::text[], $4::date[], $5::bool[])`, [ms, wEmp, wName, wDate, wYes]);
-    await db.query("COMMIT");
-  } catch (e) {
-    await db.query("ROLLBACK");
-    throw e;
-  } finally {
-    db.release();
-  }
+    await insertChunked(m, WednesdayAttendance, wed);
+  });
   return { month: ms, visits: rows.length, issues: issues.length, wednesdayRows: roster.size * wednesdays.length };
 }

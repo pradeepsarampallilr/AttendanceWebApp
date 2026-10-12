@@ -262,7 +262,7 @@ export default function WednesdayPage({ month }: { month: string }) {
   };
   const emps = useMemo(() => filterWed(all, q, tier), [all, q, tier]);
 
-  if (!month) return <Empty text="No months yet. Upload files first." />;
+  if (!month) return <Empty text="Nothing Processed yet, upload and process first!" />;
   if (months.loading || wed.loading) return <p className="text-sm text-slate-500">Loading…</p>;
   if (months.error || wed.error) return <p className="text-sm text-red-600">Error: {months.error ?? wed.error}</p>;
   if (!processed) return <Empty text={`${month} has not been processed. Process this month first (Upload page).`} />;

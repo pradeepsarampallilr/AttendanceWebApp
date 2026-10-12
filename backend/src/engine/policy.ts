@@ -26,10 +26,7 @@ function datesInWeekBucket(year: number, month: number, week: number): DateStr[]
   return out;
 }
 
-/**
- * Compliant if every non-holiday Wednesday in the bucket was attended and >= 3 days attended that week.
- * Public holidays are skipped for the Wednesday check, and lower the 3-day bar to the weekdays that remain.
- */
+
 export function evaluateWeekCompliance(
   eligibility: string, year: number, month: number, week: number, attended: Set<DateStr>,
   holidays: ReadonlySet<DateStr> = new Set(),

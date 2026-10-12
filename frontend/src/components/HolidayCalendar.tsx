@@ -118,7 +118,7 @@ export default function HolidayCalendar({ initialMonth }: { initialMonth: string
             <div className="flex items-center gap-2">
               <button className="btn btn-secondary" onClick={clearAll} disabled={busy || picked.size === 0}>Clear all</button>
               <button className="btn btn-secondary" onClick={discard} disabled={busy || !dirty}>Discard</button>
-              <button className="btn btn-primary" onClick={save} disabled={busy || !dirty}>{busy ? 'Saving…' : 'Save holidays'}</button>
+              <button className="btn btn-primary" onClick={save} disabled={busy || !dirty}>{busy ? 'Saving…' : 'Save'}</button>
             </div>
           </div>
           <div className="min-h-9 mt-2 flex justify-center items-center text-sm">

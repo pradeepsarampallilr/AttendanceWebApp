@@ -16,6 +16,8 @@ export interface DatasetInput {
   fallbackNames: Map<string, string>;
   /** Public holidays for the month ('YYYY-MM-DD'); omitted = none. */
   holidays?: ReadonlySet<DateStr>;
+  /** employeeId -> leave dates in the month; subtracted from that employee's working-day denominator like holidays. */
+  leaves?: ReadonlyMap<string, ReadonlySet<DateStr>>;
 }
 
 export interface DatasetResult {
@@ -83,7 +85,8 @@ export function buildAttendanceDataset(input: DatasetInput): DatasetResult {
     for (const [w, set] of attendedPerWeek) weekCompliance.set(w, evaluateWeekCompliance(eligibility, year, month, w, set, holidays));
 
     const totalHours = groups.reduce((s, g) => s + (groupTotalHours(g) ?? 0), 0);
-    const monthCompliant = evaluateMonthCompliance(eligibility, totalHours, workingDaysInMonth(year, month, holidays), weekCompliance);
+    const offDays = new Set<DateStr>([...holidays, ...(input.leaves?.get(employeeId) ?? [])]);
+    const monthCompliant = evaluateMonthCompliance(eligibility, totalHours, workingDaysInMonth(year, month, offDays), weekCompliance);
 
     const attended = new Set<DateStr>();
     for (const g of groups) {

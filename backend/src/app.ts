@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import express, { type ErrorRequestHandler } from "express";
-import { pool } from "./db.js";
-import { ValidationError } from "./io/tables.js";
+import { AppDataSource } from "./db.js";
+import { ValidationError, buildTemplate, isTemplateKind } from "./io/tables.js";
+import { leavesRouter } from "./routes/leaves.js";
 import { monthsRouter } from "./routes/months.js";
 import { uploadsRouter } from "./routes/uploads.js";
 import { NotFoundError } from "./services/process.js";
@@ -12,11 +13,17 @@ export function createApp() {
   app.use(express.json());
 
   app.get("/api/health", async (_req, res) => {
-    const { rows } = await pool.query("SELECT now() AS now");
-    res.json({ ok: true, dbTime: rows[0].now });
+    const [{ now }] = await AppDataSource.query("SELECT now() AS now");
+    res.json({ ok: true, dbTime: now });
+  });
+  app.get("/api/templates/:kind", async (req, res) => {
+    const kind = req.params.kind.replace(/\.xlsx$/i, "");
+    if (!isTemplateKind(kind)) throw new NotFoundError(`Unknown template: ${kind}`);
+    res.attachment(`${kind}-template.xlsx`).type("xlsx").send(await buildTemplate(kind));
   });
   app.use("/api/uploads", uploadsRouter);
   app.use("/api/months", monthsRouter);
+  app.use("/api/leaves", leavesRouter);
 
   // Production: serve the built client (set CLIENT_DIST) with SPA fallback; /api stays JSON-only.
   const dist = process.env.CLIENT_DIST && path.resolve(process.env.CLIENT_DIST);

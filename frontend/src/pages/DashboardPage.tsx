@@ -48,7 +48,7 @@ export default function DashboardPage({ month }: { month: string }) {
     });
   const jump = (id: string) => set({ tab: 'employee', emp: id });
 
-  if (!month) return <Empty text="No months yet. Upload files first." />;
+  if (!month) return <Empty text="Nothing Processed yet, upload and process first!" />;
   if (months.loading || att.loading) return <p className="text-sm text-slate-500">Loading…</p>;
   if (months.error || att.error) return <p className="text-sm text-red-600">Error: {months.error ?? att.error}</p>;
   if (!processed) return <Empty text={`${month} has not been processed. Process this month first (Upload page).`} />;

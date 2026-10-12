@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import pg from "../node_modules/@types/pg/index.js";
+import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const FIX = new URL("../../fixtures/", import.meta.url);
@@ -10,7 +10,8 @@ const TEST_DB = "attendance_test";
 
 let server: Server;
 let base: string;
-let pool: pg.Pool;
+let ds: import("typeorm").DataSource;
+const query = async (sql: string, params?: unknown[]) => ({ rows: (await ds.query(sql, params)) as any[] });
 
 async function send(kind: string, file: string, name = file) {
   const form = new FormData();
@@ -31,7 +32,7 @@ beforeAll(async () => {
   process.env.DB_NAME = TEST_DB;
 
   const db = await import("../src/db.js");
-  pool = db.pool;
+  ds = db.AppDataSource;
   await db.migrate();
   const { createApp } = await import("../src/app.js");
   server = createApp().listen(0);
@@ -40,7 +41,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   server?.close();
-  await pool?.end();
+  await ds?.destroy();
 });
 
 describe("upload validation", () => {
@@ -61,10 +62,10 @@ describe("upload + process matches golden", () => {
     expect((await send("roster", "roster.xlsx")).status).toBe(201);
     expect((await send("movement", "july_movement.xlsx")).status).toBe(201);
     expect((await send("movement", "august_movement.xlsx")).status).toBe(201);
-    const before = (await pool.query("SELECT count(*)::int AS n FROM swipe_events")).rows[0].n;
+    const before = (await query("SELECT count(*)::int AS n FROM swipe_events")).rows[0].n;
     const again = await send("movement", "august_movement.xlsx");
     expect(again.status).toBe(201);
-    expect((await pool.query("SELECT count(*)::int AS n FROM swipe_events")).rows[0].n).toBe(before);
+    expect((await query("SELECT count(*)::int AS n FROM swipe_events")).rows[0].n).toBe(before);
     const months = await get("/months");
     expect(months.map((m: any) => m.month)).toEqual(["2026-08-01", "2026-07-01"]);
     expect((await get("/uploads")).length).toBeGreaterThanOrEqual(3);
@@ -74,8 +75,8 @@ describe("upload + process matches golden", () => {
     const gold = JSON.parse(readFileSync(new URL(`${name}.json`, GOLD), "utf8"));
     expect((await post(`/months/${ym}/process`)).status).toBe(200);
     // Seed manual data and make sure a reprocess leaves it alone.
-    await pool.query("INSERT INTO manual_adjustments (month, employee_id, work_date, action, hours) VALUES ($1, $2, $3, 'add', 1) ON CONFLICT DO NOTHING", [`${ym}-01`, `m${ym}`, `${ym}-02`]);
-    await pool.query("INSERT INTO wednesday_overrides (month, employee_id, wednesday, attended) VALUES ($1, $2, $3, true) ON CONFLICT DO NOTHING", [`${ym}-01`, `m${ym}`, `${ym}-02`]);
+    await query("INSERT INTO manual_adjustments (month, employee_id, work_date, action, hours) VALUES ($1, $2, $3, 'add', 1) ON CONFLICT DO NOTHING", [`${ym}-01`, `m${ym}`, `${ym}-02`]);
+    await query("INSERT INTO wednesday_overrides (month, employee_id, wednesday, attended) VALUES ($1, $2, $3, true) ON CONFLICT DO NOTHING", [`${ym}-01`, `m${ym}`, `${ym}-02`]);
     expect((await post(`/months/${ym}/process`)).status).toBe(200);
 
     const rows = await get(`/months/${ym}/attendance`);
@@ -97,7 +98,7 @@ describe("upload + process matches golden", () => {
     expect(pairIssues).toEqual(gold.issues);
 
     const wed = await get(`/months/${ym}/wednesday`);
-    const rosterSize = (await pool.query("SELECT count(*)::int AS n FROM roster_employees")).rows[0].n;
+    const rosterSize = (await query("SELECT count(*)::int AS n FROM roster_employees")).rows[0].n;
     expect(wed.employees.length).toBe(rosterSize);
     expect(wed.wednesdays.length).toBeGreaterThanOrEqual(4);
     const yes = new Map<string, Set<string>>();
@@ -106,7 +107,7 @@ describe("upload + process matches golden", () => {
       expect(e.attended[w]).toBe(yes.get(e.employeeId)?.has(w) ?? false);
     }
 
-    const manual = await pool.query("SELECT (SELECT count(*) FROM manual_adjustments WHERE employee_id = $1)::int AS a, (SELECT count(*) FROM wednesday_overrides WHERE employee_id = $1)::int AS w", [`m${ym}`]);
+    const manual = await query("SELECT (SELECT count(*) FROM manual_adjustments WHERE employee_id = $1)::int AS a, (SELECT count(*) FROM wednesday_overrides WHERE employee_id = $1)::int AS w", [`m${ym}`]);
     expect(manual.rows[0]).toEqual({ a: 1, w: 1 });
   }, 120_000);
 });
@@ -189,14 +190,14 @@ describe("transport upload", () => {
   });
 
   it("sets NA for general shift, Yes for listed, No for unlisted non-general staff", async () => {
-    const { rows } = await pool.query(
+    const { rows } = await query(
       "SELECT DISTINCT employee_id, eligibility FROM attendance_visits WHERE month = '2026-08-01' ORDER BY employee_id");
     const nonGeneral = rows.filter((r) => r.eligibility === "Yes");
     expect(nonGeneral.length).toBeGreaterThan(1);
     const listed = nonGeneral[0].employee_id;
     const res = await sendCsv(`${HEADER}\nEng,${listed},A B,a@x.com,Eng,999,M,Boss,b@x.com,Mon-Fri,Night,1 St,Area,City,500001`);
     expect(res.status).toBe(201);
-    const { rows: out } = await pool.query(
+    const { rows: out } = await query(
       "SELECT DISTINCT employee_id, eligibility, transport_opt_in AS t FROM attendance_visits WHERE month = '2026-08-01'");
     for (const r of out) {
       expect(r.t).toBe(r.eligibility === "No" ? "NA" : r.employee_id === listed ? "Yes" : "No");

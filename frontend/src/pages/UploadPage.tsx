@@ -1,11 +1,20 @@
 import { useEffect, useState } from 'react';
-import { api, toYm, type ProcessResult } from '../api';
+import { api, toYm, type ProcessResult, type UploadKind } from '../api';
 import { useAsync } from '../useAsync';
 import UploadCard from '../components/UploadCard';
 import HolidayCalendar from '../components/HolidayCalendar';
+import LeaveCalendar from '../components/LeaveCalendar';
+import ConfirmModal from '../components/ConfirmModal';
 import { Notice, Pager } from '../components/dashboard/shared';
 
 const HISTORY_PAGE = 10;
+
+async function sendKind(kind: UploadKind, file: File) {
+  const r = await api.upload(kind, file);
+  return (
+    <>Uploaded <b>{r.filename}</b>: {kind !== 'movement' ? `${r.employees} employees` : `${r.month?.slice(0, 7)} — ${r.events} events`}</>
+  );
+}
 
 const badge = (ok: boolean) =>
   `text-xs px-2 py-0.5 rounded-full ${ok ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`;
@@ -14,6 +23,7 @@ export default function UploadPage({ onChanged, month }: { onChanged: () => void
   const uploads = useAsync(api.uploads, []);
   const months = useAsync(api.months, []);
   const [busyYm, setBusyYm] = useState<string | null>(null);
+  const [deleteYm, setDeleteYm] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, ProcessResult>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [historyPage, setHistoryPage] = useState(0);
@@ -41,15 +51,40 @@ export default function UploadPage({ onChanged, month }: { onChanged: () => void
     }
   }
 
+  async function remove(ym: string) {
+    setBusyYm(ym);
+    setErrors(({ [ym]: _, ...rest }) => rest);
+    try {
+      await api.deleteMonth(ym);
+      setResults(({ [ym]: _, ...rest }) => rest);
+      refresh();
+    } catch (e) {
+      setErrors((p) => ({ ...p, [ym]: (e as Error).message }));
+    } finally {
+      setBusyYm(null);
+      setDeleteYm(null);
+    }
+  }
+
   return (
     <div className="space-y-8">
-      <section className="grid md:grid-cols-3 gap-4">
-        <UploadCard kind="roster" title="Roster" hint="Employee list (replaces the current roster)." onDone={refresh} />
-        <UploadCard kind="movement" title="Movement" hint="Badge events for one month." onDone={refresh} />
-        <UploadCard kind="transport" title="Transport" hint="Transport details (replaces the current list)." onDone={refresh} />
+      <section className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <UploadCard title="Employee Details" hint="Employee list (replaces the current roster)." template="roster" upload={(f) => sendKind('roster', f)} onDone={refresh} />
+        <UploadCard title="Monthly Check In/Out's" hint="Badge events for one month." template="movement" upload={(f) => sendKind('movement', f)} onDone={refresh} />
+        <UploadCard title="Transport Details" hint="Transport details (replaces the current list)." template="transport" upload={(f) => sendKind('transport', f)} onDone={refresh} />
+        <UploadCard title="Leaves Details" hint="Row: Employee ID, Leave Date (optional Name, Description). Adds to existing leaves."
+          template="leaves"
+          upload={async (f) => {
+            const r = await api.uploadLeaves(f);
+            return <>Uploaded <b>{r.filename}</b>: {r.leaves} leave days · {r.employees} employees ({r.months.join(', ')})</>;
+          }}
+          onDone={refresh}
+        />
       </section>
 
       <HolidayCalendar initialMonth={month} />
+
+      <LeaveCalendar initialMonth={month} />
 
       <section>
         <h2 className="font-semibold mb-2">Months</h2>
@@ -70,6 +105,9 @@ export default function UploadPage({ onChanged, month }: { onChanged: () => void
                   className="btn btn-primary ml-auto"
                 >
                   {busyYm === ym ? 'Processing…' : m.processed ? 'Reprocess' : 'Process month'}
+                </button>
+                <button onClick={() => setDeleteYm(ym)} disabled={busyYm !== null} className="btn btn-danger">
+                  Delete
                 </button>
                 {r && (
                   <Notice tone="info" className="basis-full" onClose={() => setResults(({ [ym]: _, ...rest }) => rest)}>
@@ -117,6 +155,14 @@ export default function UploadPage({ onChanged, month }: { onChanged: () => void
         </div>
         <Pager page={historyPage} pages={historyPages} onPage={setHistoryPage} />
       </section>
+      {deleteYm && (
+        <ConfirmModal title={`Delete ${deleteYm} report?`} confirmLabel="Delete report" busy={busyYm === deleteYm}
+          onConfirm={() => remove(deleteYm)} onCancel={() => setDeleteYm(null)}>
+          <p>This permanently deletes the uploaded check-in/out file, the processed attendance and audit results for this month.</p>
+          <p className="font-medium text-rose-700">It will also delete all manual overrides for this month (edited hours and Wednesday attendance overrides).</p>
+          <p>Holidays and leaves are kept. This cannot be undone.</p>
+        </ConfirmModal>
+      )}
     </div>
   );
 }

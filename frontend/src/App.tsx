@@ -29,7 +29,7 @@ export default function App() {
     <div className="min-h-screen">
       <header className="bg-white border-b border-slate-200">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center gap-2">
-          <span className="font-semibold mr-4">Attendance Engine</span>
+          <span className="font-semibold mr-4">Attendance Management System</span>
           <NavLink to={`/upload${search}`} className={linkCls}>Upload</NavLink>
           <NavLink to={`/dashboard${search}`} className={linkCls}>Dashboard</NavLink>
           <NavLink to={`/wednesday${search}`} className={linkCls}>Wednesday</NavLink>

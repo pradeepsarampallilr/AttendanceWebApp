@@ -3,7 +3,6 @@ import {
 } from "./core.js";
 import { crossesMidnight, type AuditIssue, type ShiftWindow, type SwipeEvent, type Visit, type WorkDateGroup } from "./types.js";
 
-/** Greedily pair check-ins with the earliest valid, unused checkout. */
 export function pairSwipeEvents(
   employeeId: string, events: SwipeEvent[], monthStart: DateStr,
 ): { visits: Visit[]; issues: AuditIssue[] } {

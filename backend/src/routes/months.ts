@@ -1,11 +1,17 @@
 import { Router } from "express";
-import { pool } from "../db.js";
+import { And, LessThan, MoreThanOrEqual } from "typeorm";
+import { AppDataSource } from "../db.js";
+import {
+  AttendanceVisit, AuditIssue, Leave, ManualAdjustment, PublicHoliday, RosterEmployee, Upload, WednesdayAttendance, WednesdayOverride,
+} from "../models/index.js";
+import { insertChunked, nextMonthStart } from "../services/store.js";
 import { processMonth } from "../services/process.js";
 import { applyAdjustments } from "../services/adjustments.js";
 import { buildWorkbook } from "../services/export.js";
 import { NotFoundError } from "../services/process.js";
 
 export const monthsRouter = Router();
+const repo = AppDataSource.getRepository.bind(AppDataSource);
 const toMonth = (ym: string) => {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(ym)) throw new RangeError("Month must look like 2026-08");
   return `${ym}-01`;
@@ -13,44 +19,58 @@ const toMonth = (ym: string) => {
 
 monthsRouter.post("/:ym/process", async (req, res) => res.json(await processMonth(req.params.ym)));
 
-monthsRouter.get("/", async (_req, res) => {
-  const { rows } = await pool.query(
-    `SELECT u.month, u.filename, u.uploaded_at AS "uploadedAt",
-            EXISTS (SELECT 1 FROM attendance_visits v WHERE v.month = u.month) AS processed
-     FROM uploads u WHERE u.kind = 'movement' ORDER BY u.month DESC`);
-  res.json(rows);
+/** Delete a month's report: its movement uploads (swipe events cascade), computed output, and manual edits. Holidays and leaves are kept. */
+monthsRouter.delete("/:ym", async (req, res) => {
+  const month = toMonth(req.params.ym);
+  await AppDataSource.transaction(async (m) => {
+    const { affected } = await m.delete(Upload, { kind: "movement", month });
+    if (!affected) throw new NotFoundError(`No movement upload for ${req.params.ym}`);
+    for (const entity of [AttendanceVisit, AuditIssue, WednesdayAttendance, WednesdayOverride, ManualAdjustment])
+      await m.delete(entity, { month });
+  });
+  res.status(204).end();
 });
 
+monthsRouter.get("/", async (_req, res) => {
+  res.json(await repo(Upload).createQueryBuilder("u")
+    .select("u.month", "month").addSelect("u.filename", "filename").addSelect("u.uploadedAt", "uploadedAt")
+    .addSelect("EXISTS (SELECT 1 FROM attendance_visits v WHERE v.month = u.month)", "processed")
+    .where("u.kind = 'movement'").orderBy("u.month", "DESC").getRawMany());
+});
+
+const ATTENDANCE_COLUMNS = [
+  "employeeId", "email", "department", "managerName", "managerEmail", "week", "weekAttendedDays", "workDate",
+  "checkIn", "checkOut", "visitHours", "dailyTotalHours", "rowsInDayGroup", "shiftLabel", "eligibility", "compliant",
+  "weekCompliant", "monthCompliant", "transportOptIn",
+] as const;
+
 async function attendanceRows(ym: string) {
-  const { rows } = await pool.query(
-    `SELECT employee_id AS "employeeId", employee_name AS name, email, department, manager_name AS "managerName",
-            manager_email AS "managerEmail", week, week_attended_days AS "weekAttendedDays", work_date AS "workDate",
-            check_in AS "checkIn", check_out AS "checkOut", visit_hours AS "visitHours", daily_total_hours AS "dailyTotalHours",
-            is_first_row AS "isFirstRowOfDayGroup", rows_in_day_group AS "rowsInDayGroup", shift_label AS "shiftLabel",
-            eligibility, compliant, week_compliant AS "weekCompliant", month_compliant AS "monthCompliant",
-            transport_opt_in AS "transportOptIn"
-     FROM attendance_visits WHERE month = $1 ORDER BY employee_name COLLATE "C", work_date, check_in, id`, [toMonth(ym)]);
-  const { rows: adj } = await pool.query(
-    `SELECT employee_id AS "employeeId", work_date AS "workDate", action, hours::float8 AS hours, note
-     FROM manual_adjustments WHERE month = $1`, [toMonth(ym)]);
+  // Raw (not hydrated) so DATE / naive TIMESTAMP stay strings and the response shape is unchanged.
+  const qb = repo(AttendanceVisit).createQueryBuilder("v").select("v.employeeName", "name").addSelect("v.isFirstRow", "isFirstRowOfDayGroup");
+  for (const c of ATTENDANCE_COLUMNS) qb.addSelect(`v.${c}`, c);
+  const rows = await qb.where("v.month = :month", { month: toMonth(ym) })
+    .orderBy('v.employee_name COLLATE "C"').addOrderBy("v.workDate").addOrderBy("v.checkIn").addOrderBy("v.id").getRawMany();
+  const adj = await repo(ManualAdjustment).find({
+    where: { month: toMonth(ym) }, select: { employeeId: true, workDate: true, action: true, hours: true, note: true } });
   return applyAdjustments(rows, adj);
 }
 
 monthsRouter.get("/:ym/attendance", async (req, res) => res.json(await attendanceRows(req.params.ym)));
 
 monthsRouter.get("/:ym/audit", async (req, res) => {
-  const { rows } = await pool.query(
-    `SELECT employee_id AS "employeeId", issue_type AS "issueType", at, detail
-     FROM audit_issues WHERE month = $1 ORDER BY id`, [toMonth(req.params.ym)]);
-  res.json(rows);
+  res.json(await repo(AuditIssue).createQueryBuilder("a")
+    .select("a.employeeId", "employeeId").addSelect("a.issueType", "issueType").addSelect("a.at", "at").addSelect("a.detail", "detail")
+    .where("a.month = :month", { month: toMonth(req.params.ym) }).orderBy("a.id").getRawMany());
 });
 
 async function wednesdayData(ym: string) {
-  const { rows } = await pool.query(
-    `SELECT w.employee_id AS "employeeId", w.employee_name AS name, w.wednesday, COALESCE(o.attended, w.attended) AS attended
-     FROM wednesday_attendance w
-     LEFT JOIN wednesday_overrides o ON o.employee_id = w.employee_id AND o.wednesday = w.wednesday
-     WHERE w.month = $1 ORDER BY w.employee_name COLLATE "C", w.employee_id, w.wednesday`, [toMonth(ym)]);
+  const rows = await repo(WednesdayAttendance).createQueryBuilder("w")
+    .leftJoin(WednesdayOverride, "o", "o.employeeId = w.employeeId AND o.wednesday = w.wednesday")
+    .select("w.employeeId", "employeeId").addSelect("w.employeeName", "name").addSelect("w.wednesday", "wednesday")
+    .addSelect("COALESCE(o.attended, w.attended)", "attended")
+    .where("w.month = :month", { month: toMonth(ym) })
+    .orderBy('w.employee_name COLLATE "C"').addOrderBy("w.employeeId").addOrderBy("w.wednesday")
+    .getRawMany<{ employeeId: string; name: string; wednesday: string; attended: boolean }>();
   const wednesdays = [...new Set<string>(rows.map((r) => r.wednesday))].sort();
   const byEmp = new Map<string, { employeeId: string; name: string; attended: Record<string, boolean> }>();
   for (const r of rows) {
@@ -59,9 +79,8 @@ async function wednesdayData(ym: string) {
     e.attended[r.wednesday] = r.attended;
   }
   // Read live (not stored at process time) so holiday edits show without reprocessing.
-  const { rows: hol } = await pool.query(
-    "SELECT to_char(holiday_date, 'YYYY-MM-DD') AS d FROM public_holidays WHERE month = $1 ORDER BY holiday_date", [toMonth(ym)]);
-  const holidaySet = new Set<string>(hol.map((h) => h.d));
+  const hol = await repo(PublicHoliday).find({ where: { month: toMonth(ym) } });
+  const holidaySet = new Set<string>(hol.map((h) => h.holidayDate));
   return { wednesdays, holidays: wednesdays.filter((w) => holidaySet.has(w)), employees: [...byEmp.values()] };
 }
 
@@ -75,13 +94,10 @@ monthsRouter.put("/:ym/wednesday", async (req, res) => {
   const { employeeId, wednesday, attended } = req.body ?? {};
   if (typeof employeeId !== "string" || !isDate(wednesday) || (attended !== null && typeof attended !== "boolean"))
     throw new RangeError("Body must be {employeeId, wednesday: 'YYYY-MM-DD', attended: boolean|null}");
-  const { rowCount } = await pool.query(
-    "SELECT 1 FROM wednesday_attendance WHERE month = $1 AND employee_id = $2 AND wednesday = $3", [month, employeeId, wednesday]);
-  if (!rowCount) throw new NotFoundError("No such employee/Wednesday in this month");
-  if (attended === null) await pool.query("DELETE FROM wednesday_overrides WHERE employee_id = $1 AND wednesday = $2", [employeeId, wednesday]);
-  else await pool.query(
-    `INSERT INTO wednesday_overrides (month, employee_id, wednesday, attended) VALUES ($1,$2,$3,$4)
-     ON CONFLICT (employee_id, wednesday) DO UPDATE SET attended = EXCLUDED.attended`, [month, employeeId, wednesday, attended]);
+  if (!(await repo(WednesdayAttendance).existsBy({ month, employeeId, wednesday })))
+    throw new NotFoundError("No such employee/Wednesday in this month");
+  if (attended === null) await repo(WednesdayOverride).delete({ employeeId, wednesday });
+  else await repo(WednesdayOverride).upsert({ month, employeeId, wednesday, attended }, ["employeeId", "wednesday"]);
   res.json({ ok: true });
 });
 
@@ -93,33 +109,30 @@ monthsRouter.put("/:ym/hours", async (req, res) => {
     throw new RangeError("Body must be {employeeId, workDate inside the month, hours | remove: true, note?}");
   if (!remove && !(typeof hours === "number" && hours >= 0 && hours <= 24))
     throw new RangeError("hours must be a number between 0 and 24");
-  const { rows: [{ n }] } = await pool.query(
-    "SELECT count(*)::int AS n FROM attendance_visits WHERE month = $1 AND employee_id = $2 AND work_date = $3", [month, employeeId, workDate]);
-  if (!n) {
-    const { rowCount } = await pool.query("SELECT 1 FROM attendance_visits WHERE month = $1 AND employee_id = $2 LIMIT 1", [month, employeeId]);
-    if (!rowCount) throw new NotFoundError("Employee has no attendance rows in this month");
+  const visits = repo(AttendanceVisit);
+  const hasDay = await visits.existsBy({ month, employeeId, workDate });
+  if (!hasDay) {
+    if (!(await visits.existsBy({ month, employeeId }))) throw new NotFoundError("Employee has no attendance rows in this month");
     if (remove) throw new RangeError("Nothing to delete on that date");
   }
-  const action = n ? (remove ? "delete" : "edit") : "add";
-  await pool.query(
-    `INSERT INTO manual_adjustments (month, employee_id, work_date, action, hours, note) VALUES ($1,$2,$3,$4,$5,$6)
-     ON CONFLICT (employee_id, work_date) DO UPDATE SET action = EXCLUDED.action, hours = EXCLUDED.hours, note = EXCLUDED.note, created_at = now()`,
-    [month, employeeId, workDate, action, remove ? null : hours, typeof note === "string" ? note : null]);
+  const action = hasDay ? (remove ? "delete" : "edit") : "add";
+  await repo(ManualAdjustment).upsert(
+    { month, employeeId, workDate, action, hours: remove ? null : hours, note: typeof note === "string" ? note : null, createdAt: new Date() },
+    ["employeeId", "workDate"]);
   res.json({ ok: true, action });
 });
 
 /** Revert an adjustment, restoring the engine's value. */
 monthsRouter.delete("/:ym/hours/:employeeId/:date", async (req, res) => {
-  const { rowCount } = await pool.query(
-    "DELETE FROM manual_adjustments WHERE month = $1 AND employee_id = $2 AND work_date = $3", [toMonth(req.params.ym), req.params.employeeId, req.params.date]);
-  if (!rowCount) throw new NotFoundError("No adjustment for that employee/date");
+  const { affected } = await repo(ManualAdjustment).delete({
+    month: toMonth(req.params.ym), employeeId: req.params.employeeId, workDate: req.params.date });
+  if (!affected) throw new NotFoundError("No adjustment for that employee/date");
   res.json({ ok: true });
 });
 
 monthsRouter.get("/:ym/export.xlsx", async (req, res) => {
   const month = toMonth(req.params.ym);
-  const { rowCount } = await pool.query("SELECT 1 FROM attendance_visits WHERE month = $1 LIMIT 1", [month]);
-  if (!rowCount) throw new NotFoundError(`${req.params.ym} has not been processed`);
+  if (!(await repo(AttendanceVisit).existsBy({ month }))) throw new NotFoundError(`${req.params.ym} has not been processed`);
   const wb = await buildWorkbook(req.params.ym, await attendanceRows(req.params.ym), await wednesdayData(req.params.ym));
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename="attendance-${req.params.ym}.xlsx"`);
@@ -128,8 +141,8 @@ monthsRouter.get("/:ym/export.xlsx", async (req, res) => {
 });
 
 monthsRouter.get("/:ym/holidays", async (req, res) => {
-  const { rows } = await pool.query("SELECT holiday_date AS date FROM public_holidays WHERE month = $1 ORDER BY holiday_date", [toMonth(req.params.ym)]);
-  res.json(rows.map((r) => r.date));
+  const rows = await repo(PublicHoliday).find({ where: { month: toMonth(req.params.ym) }, order: { holidayDate: "ASC" } });
+  res.json(rows.map((r) => r.holidayDate));
 });
 
 /** Replace the month's holiday set with `dates` (each must fall inside the month; weekends are rejected). */
@@ -140,18 +153,65 @@ monthsRouter.put("/:ym/holidays", async (req, res) => {
     throw new RangeError("Body must be {dates: ['YYYY-MM-DD', ...]} with every date inside the month");
   if (dates.some((d) => new Date(`${d}T00:00:00Z`).getUTCDay() % 6 === 0)) throw new RangeError("Holidays must fall on weekdays");
   const unique = [...new Set<string>(dates)].sort();
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query("DELETE FROM public_holidays WHERE month = $1", [month]);
-    if (unique.length) await client.query(
-      "INSERT INTO public_holidays (holiday_date, month) SELECT d::date, $2::date FROM unnest($1::text[]) AS d", [unique, month]);
-    await client.query("COMMIT");
-  } catch (e) {
-    await client.query("ROLLBACK");
-    throw e;
-  } finally {
-    client.release();
-  }
+  await AppDataSource.transaction(async (m) => {
+    await m.delete(PublicHoliday, { month });
+    await insertChunked(m, PublicHoliday, unique.map((holidayDate) => m.create(PublicHoliday, { holidayDate, month })));
+  });
   res.json(unique);
+});
+
+const inMonth = (month: string) => And(MoreThanOrEqual(month), LessThan(nextMonthStart(month)));
+
+monthsRouter.get("/:ym/leaves", async (req, res) => {
+  const rows = await repo(Leave).find({
+    where: { leaveDate: inMonth(toMonth(req.params.ym)) }, order: { leaveDate: "ASC", employeeName: "ASC" } });
+  res.json(rows.map((r) => ({ id: r.id, employeeId: r.employeeId, employeeName: r.employeeName, leaveDate: r.leaveDate, leaveDescription: r.leaveDescription })));
+});
+
+/** Add (or update) one leave: {employeeId, employeeName?, date, description?}. Reprocess the month to apply it. */
+monthsRouter.post("/:ym/leaves", async (req, res) => {
+  const { employeeId, employeeName = "", date, description = "" } = req.body ?? {};
+  if (typeof employeeId !== "string" || !employeeId.trim() || !isDate(date) || !date.startsWith(req.params.ym))
+    throw new RangeError("Body must be {employeeId, employeeName?, date: 'YYYY-MM-DD' inside the month, description?}");
+  const leaves = repo(Leave);
+  await leaves.upsert(
+    { employeeId: employeeId.trim(), employeeName: String(employeeName), leaveDate: date, leaveDescription: String(description) },
+    ["employeeId", "leaveDate"]);
+  const saved = await leaves.findOneByOrFail({ employeeId: employeeId.trim(), leaveDate: date });
+  res.status(201).json({ id: saved.id, employeeId: saved.employeeId, employeeName: saved.employeeName, leaveDate: saved.leaveDate, leaveDescription: saved.leaveDescription });
+});
+
+monthsRouter.delete("/:ym/leaves/:id", async (req, res) => {
+  await repo(Leave).delete({ id: req.params.id, leaveDate: inMonth(toMonth(req.params.ym)) });
+  res.status(204).end();
+});
+
+/** Replace one employee's leaves in the month with `dates` (weekdays inside the month). Reprocess the month to apply. */
+monthsRouter.put("/:ym/employees/:employeeId/leaves", async (req, res) => {
+  const month = toMonth(req.params.ym);
+  const { employeeId } = req.params;
+  const { dates, employeeName = "" } = req.body ?? {};
+  if (!Array.isArray(dates) || !dates.every((d) => isDate(d) && d.startsWith(req.params.ym)))
+    throw new RangeError("Body must be {dates: ['YYYY-MM-DD', ...], employeeName?} with every date inside the month");
+  if (dates.some((d) => new Date(`${d}T00:00:00Z`).getUTCDay() % 6 === 0)) throw new RangeError("Leaves must fall on weekdays");
+  const unique = [...new Set<string>(dates)].sort();
+  await AppDataSource.transaction(async (m) => {
+    const old = await m.find(Leave, { where: { employeeId, leaveDate: inMonth(month) } });
+    const keep = new Map(old.filter((l) => unique.includes(l.leaveDate)).map((l) => [l.leaveDate, l]));
+    const gone = old.filter((l) => !keep.has(l.leaveDate)).map((l) => l.id);
+    if (gone.length) await m.delete(Leave, gone);
+    const roster = await m.findOneBy(RosterEmployee, { employeeId });
+    const name = String(employeeName) || roster?.name || old[0]?.employeeName || "";
+    const fresh = unique.filter((d) => !keep.has(d)).map((leaveDate) => m.create(Leave, { employeeId, employeeName: name, leaveDate }));
+    if (fresh.length) await insertChunked(m, Leave, fresh);
+  });
+  const rows = await repo(Leave).find({ where: { employeeId, leaveDate: inMonth(month) }, order: { leaveDate: "ASC" } });
+  res.json(rows.map((r) => r.leaveDate));
+});
+
+/** One employee's leave dates in the month. */
+monthsRouter.get("/:ym/employees/:employeeId/leaves", async (req, res) => {
+  const rows = await repo(Leave).find({
+    where: { employeeId: req.params.employeeId, leaveDate: inMonth(toMonth(req.params.ym)) }, order: { leaveDate: "ASC" } });
+  res.json(rows.map((r) => r.leaveDate));
 });

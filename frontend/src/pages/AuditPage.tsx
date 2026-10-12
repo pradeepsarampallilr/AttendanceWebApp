@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api';
 import { useAsync } from '../useAsync';
+import { Empty } from '../components/dashboard/shared';
 
 export default function AuditPage({ month }: { month: string }) {
   const { data, error, loading } = useAsync(
@@ -25,7 +26,7 @@ export default function AuditPage({ month }: { month: string }) {
     );
   }, [data, type, q]);
 
-  if (!month) return <p className="text-slate-500">Upload a movement file and pick a month.</p>;
+  if (!month) return <Empty text="Nothing Processed yet, upload and process first!" />;
   if (loading) return <p className="text-slate-500">Loading…</p>;
   if (error) return <p role="alert" className="text-red-700">{error}</p>;
   if (!data?.length)

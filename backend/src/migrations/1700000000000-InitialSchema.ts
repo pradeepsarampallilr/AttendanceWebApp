@@ -1,3 +1,14 @@
+import type { MigrationInterface, QueryRunner } from "typeorm";
+
+/**
+ * Baseline: the schema as it stood before TypeORM (formerly db/schema.sql). Every statement is idempotent so
+ * databases created by the old script adopt TypeORM's migration history without being touched.
+ */
+export class InitialSchema1700000000000 implements MigrationInterface {
+  name = "InitialSchema1700000000000";
+
+  async up(q: QueryRunner) {
+    await q.query(`
 -- Attendance engine schema. Idempotent: safe to re-run.
 CREATE TABLE IF NOT EXISTS uploads (
   id          SERIAL PRIMARY KEY,
@@ -38,8 +49,15 @@ CREATE TABLE IF NOT EXISTS swipe_events (
 CREATE INDEX IF NOT EXISTS swipe_events_at_idx ON swipe_events (at);
 -- Duplicate swipes in the source must survive (the engine keeps them), so no natural key:
 -- swap the original composite PK for a surrogate id (no-op once migrated).
-ALTER TABLE swipe_events DROP CONSTRAINT IF EXISTS swipe_events_pkey;
-ALTER TABLE swipe_events ADD COLUMN IF NOT EXISTS id BIGSERIAL PRIMARY KEY;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'swipe_events' AND column_name = 'id') THEN
+    ALTER TABLE swipe_events DROP CONSTRAINT IF EXISTS swipe_events_pkey;
+    ALTER TABLE swipe_events ADD COLUMN id BIGSERIAL PRIMARY KEY;
+  ELSIF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'swipe_events_pkey' AND conrelid = 'swipe_events'::regclass) THEN
+    -- The old schema.sql dropped this key on every start; restore it.
+    ALTER TABLE swipe_events ADD CONSTRAINT swipe_events_pkey PRIMARY KEY (id);
+  END IF;
+END $$;
 
 -- Computed output: one row per visit, same columns as the Attendance sheet.
 CREATE TABLE IF NOT EXISTS attendance_visits (
@@ -136,3 +154,12 @@ CREATE TABLE IF NOT EXISTS transport_employees (
 -- 'NA' = general shift (not eligible); otherwise 'Yes' if listed in transport_employees, else 'No'.
 ALTER TABLE attendance_visits ADD COLUMN IF NOT EXISTS transport_opt_in TEXT NOT NULL DEFAULT 'NA'
   CHECK (transport_opt_in IN ('Yes','No','NA'));
+`);
+  }
+
+  async down(q: QueryRunner) {
+    await q.query(`
+      DROP TABLE IF EXISTS transport_employees, public_holidays, wednesday_overrides, manual_adjustments,
+        audit_issues, wednesday_attendance, attendance_visits, swipe_events, roster_employees, uploads CASCADE`);
+  }
+}

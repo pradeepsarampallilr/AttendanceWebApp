@@ -4,7 +4,6 @@ import { buildRoster, type RawRosterRow, type RosterResult } from "../engine/ros
 import { parseMovementRows } from "../engine/movement.js";
 import type { EventsByEmployee } from "../engine/types.js";
 
-/** Normalise an exceljs cell value to a primitive (string | number | Date | null). */
 function plain(v: ExcelJS.CellValue): unknown {
   if (v == null) return null;
   if (typeof v === "object" && !(v instanceof Date)) {
@@ -35,6 +34,9 @@ export async function readTable(buf: Buffer, filename: string, sheetName?: strin
   return rows;
 }
 
+/** Header text without surrounding whitespace or the trailing '*' that templates use to mark required columns. */
+const stripStar = (v: unknown) => String(v ?? "").trim().replace(/\s*\*$/, "");
+
 export function rosterFromTable(rows: unknown[][]): RosterResult {
   // Columns: Work Shift, Shit timing, Emplid, Legal Name, Department, Worker Type, Sub-Type,
   //          Email, Hire Date, Manager, Transport, Current Shift Timing
@@ -46,10 +48,10 @@ export function rosterFromTable(rows: unknown[][]): RosterResult {
 
 /** Locates the 'EmpCode' header row and keeps rows up to the 'Work Hrs' column (inclusive). */
 function movementBody(rows: unknown[][]): unknown[][] {
-  const headerIdx = rows.slice(0, 10).findIndex((r) => r[1] === "EmpCode");
+  const headerIdx = rows.slice(0, 10).findIndex((r) => stripStar(r[1]) === "EmpCode");
   if (headerIdx < 0) throw new Error("Could not locate the EmpCode header row in movement file");
   const header = rows[headerIdx];
-  const workHrs = header.lastIndexOf("Work Hrs");
+  const workHrs = header.map(stripStar).lastIndexOf("Work Hrs");
   const end = workHrs >= 0 ? workHrs + 1 : header.length;
   return rows.slice(headerIdx + 1).map((r) => r.slice(0, end));
 }
@@ -76,7 +78,7 @@ const ROSTER_COLUMNS: [number, string][] = [
 /** Throws ValidationError unless the first row has the roster columns the importer reads by position. */
 export function assertRosterHeader(rows: unknown[][]) {
   const header = rows[0] ?? [];
-  const bad = ROSTER_COLUMNS.filter(([i, name]) => String(header[i] ?? "").trim().toLowerCase() !== name);
+  const bad = ROSTER_COLUMNS.filter(([i, name]) => stripStar(header[i]).toLowerCase() !== name);
   if (bad.length) {
     throw new ValidationError(`Roster file has unexpected columns; expected ${bad.map(([i, n]) => `"${n}" in column ${i + 1}`).join(", ")}`);
   }
@@ -84,7 +86,7 @@ export function assertRosterHeader(rows: unknown[][]) {
 
 /** Throws ValidationError unless an 'EmpCode' header row is found in the first 10 rows. */
 export function assertMovementHeader(rows: unknown[][]) {
-  if (!rows.slice(0, 10).some((r) => r[1] === "EmpCode")) {
+  if (!rows.slice(0, 10).some((r) => stripStar(r[1]) === "EmpCode")) {
     throw new ValidationError("Movement file must contain an 'EmpCode' header row (in column B, within the first 10 rows)");
   }
 }
@@ -108,7 +110,7 @@ const cell = (v: unknown) => (v instanceof Date ? v.toISOString().slice(0, 10) :
 
 /** Parses the transport sheet by header name (column order is free); throws ValidationError on missing columns. */
 export function transportFromTable(rows: unknown[][]): TransportRow[] {
-  const header = (rows[0] ?? []).map((h) => cell(h).toLowerCase());
+  const header = (rows[0] ?? []).map((h) => stripStar(cell(h)).toLowerCase());
   const index = new Map<keyof TransportRow, number>();
   const missing: string[] = [];
   for (const [prefix, field] of TRANSPORT_COLUMNS) {
@@ -127,4 +129,79 @@ export function transportFromTable(rows: unknown[][]): TransportRow[] {
     out.set(employeeId, row);
   }
   return [...out.values()];
+}
+
+export interface LeaveRow { employeeId: string; employeeName: string; leaveDate: string; leaveDescription: string }
+
+const LEAVE_COLUMNS: { field: keyof LeaveRow; names: string[]; required: boolean }[] = [
+  { field: "employeeId", names: ["employee id", "emplid", "empcode", "employee code", "liveramp employee id"], required: true },
+  { field: "leaveDate", names: ["leave date", "date"], required: true },
+  { field: "employeeName", names: ["employee name", "name", "legal name", "full name"], required: false },
+  { field: "leaveDescription", names: ["description", "leave description", "reason", "leave type"], required: false },
+];
+
+/** Parses a leaves sheet by header name: Employee ID + Leave Date required; Employee Name / Description optional. One row per leave day. */
+export function leavesFromTable(rows: unknown[][]): LeaveRow[] {
+  const header = (rows[0] ?? []).map((h) => stripStar(cell(h)).toLowerCase());
+  const index = new Map<keyof LeaveRow, number>();
+  const missing: string[] = [];
+  for (const { field, names, required } of LEAVE_COLUMNS) {
+    const i = header.findIndex((h) => names.includes(h));
+    if (i >= 0) index.set(field, i); else if (required) missing.push(names[0]);
+  }
+  if (missing.length) throw new ValidationError(`Leave file is missing columns: ${missing.join(", ")}`);
+
+  const out = new Map<string, LeaveRow>();
+  rows.slice(1).forEach((r, n) => {
+    const rawId = cell(r[index.get("employeeId")!]);
+    const rawDate = cell(r[index.get("leaveDate")!]);
+    if (!rawId && !rawDate) return;
+    const employeeId = /^[+-]?\d+(\.0+)?$/.test(rawId) ? String(Math.trunc(Number(rawId))) : rawId;
+    const leaveDate = rawDate.slice(0, 10);
+    if (!employeeId || !/^\d{4}-\d{2}-\d{2}$/.test(leaveDate) || Number.isNaN(Date.parse(leaveDate)))
+      throw new ValidationError(`Leave file row ${n + 2}: needs an Employee ID and a date as YYYY-MM-DD (or an Excel date)`);
+    const get = (f: keyof LeaveRow) => (index.has(f) ? cell(r[index.get(f)!]) : "");
+    out.set(`${employeeId}|${leaveDate}`, { employeeId, employeeName: get("employeeName"), leaveDate, leaveDescription: get("leaveDescription") });
+  });
+  return [...out.values()];
+}
+
+export type TemplateKind = "roster" | "movement" | "transport" | "leaves";
+
+/** Template headers; a trailing '*' marks a required column (the importers ignore it). */
+const TEMPLATES: Record<TemplateKind, { sheet: string; header: string[]; sample: unknown[] }> = {
+  roster: {
+    sheet: "Employee Details",
+    header: ["Work Shift", "Shit timing", "Emplid*", "Legal Name*", "Department", "Worker Type", "Sub-Type", "Email", "Hire Date", "Manager", "Transport", "Current Shift Timing"],
+    sample: ["General", "9:00 AM - 6:30 PM", 100123, "Jane Doe", "Engineering", "Employee", "Regular", "jane.doe@example.com", "2022-04-01", "John Smith", "No", ""],
+  },
+  movement: {
+    sheet: "Check In-Out",
+    header: ["SrNo", "EmpCode*", "Name", "TransDate*", "Controller", "Door", "In 1*", "Out 1*", "In 2", "Out 2", "In 3", "Out 3", "Work Hrs"],
+    sample: [1, 100123, "Jane Doe", "01-04-2026", "", "", "09:05:10", "13:01:22", "13:45:00", "18:35:40", "", "", ""],
+  },
+  transport: {
+    sheet: "Transport Details",
+    header: ["Department", "LiveRamp Employee ID*", "Full Name", "Employee Email", "Business Title", "Employee Contact No", "Gender", "LR Manager Name", "LR Manager Email", "Working Days", "Shift", "Home Address - Street Line 1", "Home Address - Street Line 2", "City/Town", "Postal Code"],
+    sample: ["Engineering", 100123, "Jane Doe", "jane.doe@example.com", "Software Engineer", "9999999999", "Female", "John Smith", "john.smith@example.com", "Mon-Fri", "4:00 PM - 1:30 AM", "12 Main St", "", "Hyderabad", "500081"],
+  },
+  leaves: {
+    sheet: "Leaves",
+    header: ["Employee ID*", "Leave Date*", "Employee Name", "Description"],
+    sample: [100123, "2026-04-15", "Jane Doe", "Casual leave"],
+  },
+};
+
+export const isTemplateKind = (k: string): k is TemplateKind => Object.hasOwn(TEMPLATES, k);
+
+/** Builds a one-sheet xlsx template: bold header (required columns end in '*') and one example row. */
+export async function buildTemplate(kind: TemplateKind): Promise<Buffer> {
+  const { sheet, header, sample } = TEMPLATES[kind];
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet(sheet);
+  ws.addRow(header).font = { bold: true };
+  ws.addRow(sample);
+  header.forEach((h, i) => { ws.getColumn(i + 1).width = Math.max(14, h.length + 4); });
+  if (kind === "movement") ws.getColumn(4).numFmt = "@";
+  return Buffer.from(await wb.xlsx.writeBuffer());
 }

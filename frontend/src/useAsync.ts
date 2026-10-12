@@ -23,7 +23,6 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]) {
   }, [...deps, tick]);
 
   const reload = useCallback(() => setTick((t) => t + 1), []);
-  /** Refetch without flipping `loading`, so the page keeps its state after a mutation. */
   const refresh = useCallback(() => {
     silent.current = true;
     setTick((t) => t + 1);

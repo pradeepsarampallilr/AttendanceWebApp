@@ -33,6 +33,19 @@ export interface ProcessResult {
   wednesdayRows: number;
 }
 
+export interface LeaveUploadResult {
+  filename: string;
+  leaves: number;
+  employees: number;
+  months: string[]; // 'YYYY-MM'
+}
+
+export interface EmployeeHit {
+  employeeId: string;
+  name: string;
+  department: string | null;
+}
+
 export interface AuditRow {
   employeeId: string;
   issueType: string;
@@ -64,8 +77,19 @@ export const api = {
   },
   process: (ym: string) =>
     request<ProcessResult>(`/api/months/${ym}/process`, { method: 'POST' }),
+  deleteMonth: (ym: string) => request<null>(`/api/months/${ym}`, { method: 'DELETE' }),
   audit: (ym: string) => request<AuditRow[]>(`/api/months/${ym}/audit`),
   holidays: (ym: string) => request<string[]>(`/api/months/${ym}/holidays`),
+  uploadLeaves: (file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return request<LeaveUploadResult>('/api/leaves/upload', { method: 'POST', body: fd });
+  },
+  searchEmployees: (q: string) => request<EmployeeHit[]>(`/api/leaves/employees?q=${encodeURIComponent(q)}`),
+  employeeLeaves: (ym: string, employeeId: string) =>
+    request<string[]>(`/api/months/${ym}/employees/${encodeURIComponent(employeeId)}/leaves`),
+  saveEmployeeLeaves: (ym: string, employeeId: string, employeeName: string, dates: string[]) =>
+    request<string[]>(`/api/months/${ym}/employees/${encodeURIComponent(employeeId)}/leaves`, json('PUT', { dates, employeeName })),
   saveHolidays: (ym: string, dates: string[]) => request<string[]>(`/api/months/${ym}/holidays`, json('PUT', { dates })),
 };
 

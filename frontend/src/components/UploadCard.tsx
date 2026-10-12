@@ -1,25 +1,29 @@
 import { useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Notice } from './dashboard/shared';
-import { api, type UploadKind, type UploadResult } from '../api';
 
 const OK = /\.(csv|xlsx)$/i;
 
 export default function UploadCard({
-  kind,
   title,
   hint,
+  template,
+  upload,
   onDone,
 }: {
-  kind: UploadKind;
   title: string;
   hint: string;
+  /** Template kind served by /api/templates/:kind; required columns are marked with *. */
+  template: string;
+  /** Sends the file; resolves to the success message shown under the drop zone. */
+  upload: (file: File) => Promise<ReactNode>;
   onDone: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<UploadResult | null>(null);
+  const [result, setResult] = useState<ReactNode>(null);
 
   async function send(file: File | undefined) {
     if (!file) return;
@@ -31,7 +35,7 @@ export default function UploadCard({
     setError(null);
     setBusy(true);
     try {
-      setResult(await api.upload(kind, file));
+      setResult(await upload(file));
       onDone();
     } catch (e) {
       setError((e as Error).message);
@@ -43,7 +47,20 @@ export default function UploadCard({
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-4">
-      <h2 className="font-semibold">{title}</h2>
+      <div className="flex items-start justify-between gap-2">
+        <h2 className="font-semibold">{title}</h2>
+        <a
+          href={`/api/templates/${template}`}
+          download
+          title="Download template (* = required column, others optional)"
+          aria-label={`Download ${title} template`}
+          className="shrink-0 rounded-md border border-slate-300 p-1.5 text-slate-600 hover:bg-slate-50"
+        >
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+            <path d="M10 3v9m0 0-3.5-3.5M10 12l3.5-3.5M4 16h12" />
+          </svg>
+        </a>
+      </div>
       <p className="text-sm text-slate-500 mb-3">{hint}</p>
       <div
         role="button"
@@ -82,12 +99,7 @@ export default function UploadCard({
       </div>
       {error && <Notice tone="error" className="mt-3" onClose={() => setError(null)}>{error}</Notice>}
       {result && (
-        <Notice tone="success" className="mt-3" onClose={() => setResult(null)}>
-          Uploaded <b>{result.filename}</b>:{' '}
-          {result.kind !== 'movement'
-            ? `${result.employees} employees`
-            : `${result.month?.slice(0, 7)} — ${result.events} events`}
-        </Notice>
+        <Notice tone="success" className="mt-3" onClose={() => setResult(null)}>{result}</Notice>
       )}
     </div>
   );

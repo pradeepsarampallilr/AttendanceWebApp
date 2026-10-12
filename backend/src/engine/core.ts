@@ -1,7 +1,3 @@
-// Naive wall-clock time helpers. Datetimes are JS Dates holding wall-clock values in
-// UTC fields (no timezone semantics), mirroring Python's naive datetime. Calendar
-// dates are 'YYYY-MM-DD' strings, which sort and hash correctly.
-
 export type DateStr = string;
 
 export const HOUR_MS = 3_600_000;
@@ -31,7 +27,7 @@ export function mkDate(y: number, m: number, d: number): DateStr {
 
 export const daysInMonth = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate();
 
-/** Python weekday(): Monday = 0 ... Sunday = 6 */
+
 export function weekday(date: DateStr): number {
   const [y, m, d] = date.split("-").map(Number);
   return (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
@@ -55,7 +51,7 @@ export function fmtDateTime(dt: Date): string {
   return `${fmtDate(dateOf(dt))} ${pad(dt.getUTCHours())}:${pad(dt.getUTCMinutes())}:${pad(dt.getUTCSeconds())}`;
 }
 
-/** Python-style round(x, 2): correctly rounded, ties to even. */
+
 export function round2(x: number): number {
   const scaled = x * 100;
   const floor = Math.floor(scaled);

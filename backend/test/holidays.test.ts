@@ -26,3 +26,10 @@ describe("public holidays in the engine", () => {
     expect(evaluateWeekCompliance("No", 2026, 8, 1, new Set(), new Set(["2026-08-05"]))).toBe("NA");
   });
 });
+
+describe("employee leaves", () => {
+  it("are subtracted from the denominator like holidays, without double-counting", () => {
+    const off = new Set(["2026-08-12", "2026-08-13", "2026-08-12", "2026-08-15"]); // Sat ignored
+    expect(workingDaysInMonth(2026, 8, off)).toBe(19);
+  });
+});
