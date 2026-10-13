@@ -1,18 +1,21 @@
+/**
+ * Users see who came to the office on Wednesdays, by employee or in a full table, with tiers and totals.
+ * They can search, filter and mark days present or absent.
+ */
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, wednesdayApi } from '../api';
 import { useAsync } from '../useAsync';
-import { Card, Empty, Notice, Pager, SortTh, td, th, useSort } from '../components/dashboard/shared';
+import { Card, Empty, Loading, Notice, Pager, SortTh, td, th, useSort } from '../components/dashboard/shared';
 import {
-  HOURS_PER_DAY, TARGET_RATE, filterWed, lowIndex, peakIndex, stats, summarize, tierOf, tierOptions, workingWednesdays,
+  HOURS_PER_DAY, filterWed, stats, summarize, tierOf, tierOptions, workingWednesdays,
   type TierName, type WedEmployee,
 } from '../lib/wednesday';
 
 const TABS = [
-  ['employee', 'Per Employee Attendance'],
-  ['directory', 'All Employees Directory'],
-  ['analytics', 'Weekly Turnout & Analytics'],
-  ['ledger', 'Complete Wednesday Ledger'],
+  ['employee', 'Per Employee Details'],
+  ['directory', 'All Employees Details'],
+  ['ledger', 'Complete Wednesday Details'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 const PAGE_SIZES = [10, 15, 25, 50];
@@ -177,63 +180,6 @@ function EmployeeTab({ emps, dates, allDates, holidays, selectedId, onSelect, on
   );
 }
 
-function Chart({ dates, perDate, staff }: { dates: string[]; perDate: number[]; staff: number }) {
-  const [mode, setMode] = useState<'bar' | 'trend'>('bar');
-  const W = 560, H = 240, L = 36, B = 28, T = 12;
-  const max = Math.max(staff, 1);
-  const y = (v: number) => T + (H - T - B) * (1 - v / max);
-  const x = (i: number) => L + ((W - L - 8) * (i + 0.5)) / Math.max(dates.length, 1);
-  const bw = Math.min(60, ((W - L - 8) / Math.max(dates.length, 1)) * 0.6);
-  const avg = perDate.length ? perDate.reduce((a, b) => a + b, 0) / perDate.length : 0;
-  return (
-    <div className="bg-white border border-slate-200 rounded-lg p-3">
-      <div className="flex items-center justify-between mb-2"><div className="font-medium text-sm">Headcount Turnout</div>
-        <div className="flex gap-1 text-xs">{(['bar', 'trend'] as const).map((m) => (
-          <button key={m} onClick={() => setMode(m)} className={`btn btn-sm ${mode === m ? 'btn-primary' : 'btn-secondary'}`}>{m === 'bar' ? 'Bar Columns' : 'Trend Line'}</button>))}</div></div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Wednesday headcount turnout">
-        <line x1={L} x2={W - 8} y1={y(0)} y2={y(0)} stroke="#cbd5e1" />
-        <line x1={L} x2={W - 8} y1={y(staff * TARGET_RATE)} y2={y(staff * TARGET_RATE)} stroke="#10b981" strokeDasharray="4 3" />
-        <line x1={L} x2={W - 8} y1={y(avg)} y2={y(avg)} stroke="#f59e0b" strokeDasharray="4 3" />
-        <text x={W - 10} y={y(staff * TARGET_RATE) - 3} textAnchor="end" fontSize="9" fill="#047857">75% target ({Math.round(staff * TARGET_RATE)})</text>
-        <text x={W - 10} y={y(avg) + 11} textAnchor="end" fontSize="9" fill="#b45309">avg {avg.toFixed(1)}</text>
-        {mode === 'bar' && perDate.map((v, i) => <rect key={i} x={x(i) - bw / 2} y={y(v)} width={bw} height={y(0) - y(v)} fill="#64748b" />)}
-        {mode === 'trend' && <polyline fill="none" stroke="#64748b" strokeWidth="2" points={perDate.map((v, i) => `${x(i)},${y(v)}`).join(' ')} />}
-        {mode === 'trend' && perDate.map((v, i) => <circle key={i} cx={x(i)} cy={y(v)} r="4" fill="#334155" />)}
-        {perDate.map((v, i) => <text key={`l${i}`} x={x(i)} y={y(v) - 6} textAnchor="middle" fontSize="10">{v} ({staff ? pct(v / staff) : '0%'})</text>)}
-        {dates.map((d, i) => <text key={d} x={x(i)} y={H - 10} textAnchor="middle" fontSize="10" fill="#475569">{short(d)}</text>)}
-      </svg>
-    </div>
-  );
-}
-
-function AnalyticsTab({ emps, dates }: { emps: WedEmployee[]; dates: string[] }) {
-  const n = dates.length;
-  const s = stats(emps, n);
-  if (!emps.length) return <Empty />;
-  const pk = peakIndex(s.perDate), lo = lowIndex(s.perDate);
-  return (
-    <div className="space-y-4">
-      <Chart dates={dates} perDate={s.perDate} staff={s.staff} />
-      <div className="grid grid-cols-5 gap-3">
-        {[...s.distribution.keys()].reverse().map((d) => (
-          <div key={d} className="bg-white border border-slate-200 rounded-lg p-3">
-            <div className="text-xs text-slate-500">{d} {d === 1 ? 'Day' : 'Days'} · {tierOf(d, n)}</div>
-            <div className="text-xl font-semibold">{s.distribution[d]}</div>
-            <div className="text-xs text-slate-500 mb-1">{pct(s.distribution[d] / s.staff)} of staff</div>
-            <Bar value={s.distribution[d] / s.staff} />
-          </div>
-        ))}
-      </div>
-      {pk >= 0 && (
-        <div className="grid grid-cols-2 gap-3">
-          <Card label="Peak Wednesday In-Office Turnout" value={dates[pk]} sub={`${s.perDate[pk]} attendees (${pct(s.perDate[pk] / s.staff)})`} />
-          <Card label="Attendance Opportunity & Deficit" value={dates[lo]} sub={`${s.perDate[lo]} attended · ${s.staff - s.perDate[lo]} absent`} />
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function WednesdayPage({ month }: { month: string }) {
   const [params, setParams] = useSearchParams();
   const months = useAsync(api.months, []);
@@ -263,7 +209,7 @@ export default function WednesdayPage({ month }: { month: string }) {
   const emps = useMemo(() => filterWed(all, q, tier), [all, q, tier]);
 
   if (!month) return <Empty text="Nothing Processed yet, upload and process first!" />;
-  if (months.loading || wed.loading) return <p className="text-sm text-slate-500">Loading…</p>;
+  if (months.loading || wed.loading) return <Loading />;
   if (months.error || wed.error) return <p className="text-sm text-red-600">Error: {months.error ?? wed.error}</p>;
   if (!processed) return <Empty text={`${month} has not been processed. Process this month first (Upload page).`} />;
   if (!allDates.length || !all.length) return <Empty text={`No Wednesday rows for ${month}.`} />;
@@ -297,7 +243,6 @@ export default function WednesdayPage({ month }: { month: string }) {
       </nav>
       {tab === 'employee' && <EmployeeTab emps={emps} dates={dates} allDates={allDates} holidays={holidays} selectedId={params.get('emp')} onSelect={(id) => set({ emp: id })} onToggle={toggle} />}
       {tab === 'directory' && <DirectoryTable emps={emps} dates={dates} allDates={allDates} holidays={holidays} onDetail={(id) => set({ tab: 'employee', emp: id })} onToggle={toggle} />}
-      {tab === 'analytics' && <AnalyticsTab emps={emps} dates={dates} />}
       {tab === 'ledger' && <DirectoryTable emps={emps} dates={dates} allDates={allDates} holidays={holidays} ledger onDetail={() => {}} onToggle={toggle} />}
     </div>
   );

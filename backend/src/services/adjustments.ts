@@ -1,3 +1,7 @@
+/**
+ * Applies manual hour changes (add, edit, delete) on top of the calculated attendance rows.
+ * Re-checks compliance after each change.
+ */
 import { round2, weekNumberInMonth } from "../engine/core.js";
 import { evaluateCompliance } from "../engine/policy.js";
 

@@ -1,3 +1,6 @@
+/**
+ * A month calendar where the user finds an employee and marks the days they were on leave.
+ */
 import { useEffect, useState } from 'react';
 import { api, type EmployeeHit } from '../api';
 import { useAsync } from '../useAsync';
@@ -26,7 +29,6 @@ export default function LeaveCalendar({ initialMonth }: { initialMonth: string }
   useEffect(() => { setPicked(new Set(stored.data ?? [])); }, [stored.data]);
   useEffect(() => setSaved(false), [ym, employee]);
 
-  // Debounced roster search; skipped once an employee is chosen and the box shows their label.
   useEffect(() => {
     const q = query.trim();
     if (!q || (employee && query === `${employee.name} (${employee.employeeId})`)) return setHits([]);

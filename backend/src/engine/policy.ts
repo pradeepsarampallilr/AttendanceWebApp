@@ -1,3 +1,6 @@
+/**
+ * Holds the attendance rules: who is eligible and whether a day, week or month meets the hours target.
+ */
 import { COMPLIANT_MIN_HOURS, daysInMonth, mkDate, weekday, type DateStr } from "./core.js";
 import { GENERAL_SHIFT_WINDOW } from "./roster.js";
 import type { ShiftWindow } from "./types.js";
@@ -9,7 +12,6 @@ export function isGeneralShift(shift: ShiftWindow | null): boolean {
     && shift.endMinutes === GENERAL_SHIFT_WINDOW.endMinutes;
 }
 
-/** "No" only for the exact general 9:00-6:30 shift (and not for unrostered staff). */
 export const evaluateEligibility = (shift: ShiftWindow | null): "Yes" | "No" =>
   isGeneralShift(shift) ? "No" : "Yes";
 
@@ -41,7 +43,6 @@ export function evaluateWeekCompliance(
   return wednesdaysOk && attended.size >= required ? "Yes" : "No";
 }
 
-/** Compliant if total hours / working days >= minimum and every week is compliant. */
 export function evaluateMonthCompliance(
   eligibility: string, totalHours: number, workingDays: number, weekCompliance: Map<number, Tri>,
 ): Tri {

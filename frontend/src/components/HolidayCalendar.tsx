@@ -1,3 +1,6 @@
+/**
+ * A month calendar where the user picks public holidays and saves them.
+ */
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { useAsync } from '../useAsync';

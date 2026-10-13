@@ -1,7 +1,10 @@
+/**
+ * Users see a list of data problems found for the month, filter by issue type and search by employee or detail.
+ */
 import { useMemo, useState } from 'react';
 import { api } from '../api';
 import { useAsync } from '../useAsync';
-import { Empty } from '../components/dashboard/shared';
+import { Empty, Loading } from '../components/dashboard/shared';
 
 export default function AuditPage({ month }: { month: string }) {
   const { data, error, loading } = useAsync(
@@ -27,7 +30,7 @@ export default function AuditPage({ month }: { month: string }) {
   }, [data, type, q]);
 
   if (!month) return <Empty text="Nothing Processed yet, upload and process first!" />;
-  if (loading) return <p className="text-slate-500">Loading…</p>;
+  if (loading) return <Loading />;
   if (error) return <p role="alert" className="text-red-700">{error}</p>;
   if (!data?.length)
     return <p className="text-slate-500">No audit entries for {month}. Process this month first (Upload page).</p>;

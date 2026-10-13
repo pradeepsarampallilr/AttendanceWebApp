@@ -1,3 +1,6 @@
+/**
+ * Small pieces used across dashboard pages: messages, loading and empty states, sortable table headers, pagers and date/hour formatting.
+ */
 import { useState } from 'react';
 import type { Tri } from '../../api';
 import { BENCHMARK_HOURS } from '../../lib/attendance';
@@ -14,7 +17,6 @@ const NOTICE_TONE = {
   info: 'border-slate-200 bg-slate-50 text-slate-700',
 };
 
-/** Inline message with a × button that dismisses it. */
 export function Notice({ tone, onClose, className = '', children }: {
   tone: keyof typeof NOTICE_TONE; onClose: () => void; className?: string; children: React.ReactNode;
 }) {
@@ -22,6 +24,15 @@ export function Notice({ tone, onClose, className = '', children }: {
     <div role={tone === 'error' ? 'alert' : undefined} className={`text-sm border rounded p-2 flex items-start gap-2 ${NOTICE_TONE[tone]} ${className}`}>
       <span className="flex-1">{children}</span>
       <button aria-label="Dismiss" onClick={onClose} className="leading-none px-1 hover:bg-black/5 rounded">×</button>
+    </div>
+  );
+}
+
+export function Loading({ text = 'Loading…' }: { text?: string }) {
+  return (
+    <div role="status" aria-live="polite" className="flex flex-col items-center justify-center gap-3 py-24 text-slate-500">
+      <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-slate-200 border-t-slate-700" />
+      <span className="text-sm">{text}</span>
     </div>
   );
 }
@@ -42,7 +53,6 @@ const COMPLIANCE: Record<Tri, [string, string]> = {
   NA: ['N/A', 'bg-slate-100 text-slate-600'],
 };
 
-/** Compliance marker for an employee record: the weekly status while a week / weekly filter is active, else the month's. */
 export function ComplianceBadge({ emp }: { emp: { monthCompliant: Tri; weekStatus?: Tri } }) {
   const status = emp.weekStatus ?? emp.monthCompliant;
   const [label, cls] = COMPLIANCE[status];

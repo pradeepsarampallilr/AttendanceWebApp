@@ -1,3 +1,7 @@
+/**
+ * A small helper that loads data in the background and tells the page if it is loading, failed, or done.
+ * It can also reload the data on request.
+ */
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]) {

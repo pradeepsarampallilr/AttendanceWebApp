@@ -1,3 +1,6 @@
+/**
+ * Dashboard tab for one employee: a bar chart of daily work hours and a day-by-day breakdown.
+ */
 import { useEffect, useState } from 'react';
 import { attendanceApi } from '../../api';
 import { BENCHMARK_HOURS, type EmployeeSummary } from '../../lib/attendance';
@@ -50,13 +53,11 @@ const EMP_PAGE = 15;
 
 const TAG: Record<string, string> = { add: 'added', edit: 'edited', delete: 'deleted' };
 
-/** Add / edit / delete / revert one employee-day's total hours. */
 function DailyEditor({ emp, month, onChanged }: { emp: EmployeeSummary; month: string; onChanged: () => void }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [value, setValue] = useState('');
   const [newDate, setNewDate] = useState('');
   const [err, setErr] = useState<string | null>(null);
-  // Day-group first rows; deleted days are kept so they can be reverted.
   const days = emp.rows.filter((r) => r.isFirstRowOfDayGroup && (r.dailyTotalHours !== null || r.adjustment === 'delete'));
   const run = (p: Promise<unknown>) => {
     setErr(null);

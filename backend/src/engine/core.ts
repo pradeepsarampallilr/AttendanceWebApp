@@ -1,3 +1,7 @@
+/**
+ * Basic date, time and number helpers shared by the attendance logic.
+ * Also holds the shared settings, like the 7-hour minimum for a full day.
+ */
 export type DateStr = string;
 
 export const HOUR_MS = 3_600_000;
@@ -70,13 +74,11 @@ export function workingDaysInMonth(year: number, month: number, holidays: Readon
   return n;
 }
 
-/** Fixed 7-day buckets: days 1-7 = week 1, 8-14 = week 2 ... */
+
 export const weekNumberInMonth = (date: DateStr) => Math.floor((dayOfMonth(date) - 1) / 7) + 1;
 
-/** Python str(datetime): '2026-08-04 15:57:00' (used in audit-log text). */
 export function pyDateTime(dt: Date): string {
   return `${dateOf(dt)} ${pad(dt.getUTCHours())}:${pad(dt.getUTCMinutes())}:${pad(dt.getUTCSeconds())}`;
 }
 
-/** Python str(float): 4 -> '4.0', 7.28 -> '7.28'. */
 export const pyFloat = (n: number) => (Number.isInteger(n) ? n.toFixed(1) : String(n));

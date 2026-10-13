@@ -1,3 +1,6 @@
+/**
+ * Works out attendance numbers from raw rows: hours per employee, manager totals, search and filters, and the grouped log.
+ */
 import type { AttendanceRow, Tri } from '../api';
 
 export const BENCHMARK_HOURS = 7.0;

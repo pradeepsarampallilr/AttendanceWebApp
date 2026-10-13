@@ -1,3 +1,4 @@
+/** Stores problems found in the swipe data for a month, such as odd or missing swipes. */
 import { Column, Entity, Index, PrimaryGeneratedColumn } from "typeorm";
 
 @Entity("audit_issues")

@@ -1,3 +1,4 @@
+/** Stores whether each employee attended on the Wednesdays of a month. */
 import { Column, Entity, PrimaryColumn } from "typeorm";
 
 @Entity("wednesday_attendance")

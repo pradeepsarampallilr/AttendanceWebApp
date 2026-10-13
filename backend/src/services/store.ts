@@ -1,3 +1,6 @@
+/**
+ * Saves and loads swipes, roster and visits in the database, plus small month and time helpers.
+ */
 import type { EntityManager, EntityTarget, ObjectLiteral } from "typeorm";
 import type { DateStr } from "../engine/core.js";
 import type { EventsByEmployee, RosterEntry } from "../engine/types.js";

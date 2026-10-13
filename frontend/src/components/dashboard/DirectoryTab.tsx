@@ -1,3 +1,6 @@
+/**
+ * Dashboard tab with a sortable, paged table of all employees and their hours and compliance.
+ */
 import { useEffect, useState } from 'react';
 import type { EmployeeSummary } from '../../lib/attendance';
 import { ComplianceBadge, Empty, Pager, SortTh, hrs, td, th, useSort } from './shared';

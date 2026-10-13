@@ -1,3 +1,4 @@
+/** Checks the whole web API on a fresh test database: uploads, results, manual edits, export, holidays and access list. */
 import { readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
@@ -30,6 +31,7 @@ beforeAll(async () => {
   await admin.query(`CREATE DATABASE ${TEST_DB}`);
   await admin.end();
   process.env.DB_NAME = TEST_DB;
+  process.env.OKTA_ISSUER = ""; // these tests exercise the API directly; a developer's .env must not switch auth on (dotenv won't override a set var)
 
   const db = await import("../src/db.js");
   ds = db.AppDataSource;
@@ -223,5 +225,59 @@ describe("holidays", () => {
     expect((await put("2026-08", { dates: ["2026-09-01"] })).status).toBe(400);
     expect((await put("2026-08", { dates: ["2026-08-15"] })).status).toBe(400); // Saturday
     expect((await put("2026-08", { dates: "x" })).status).toBe(400);
+  });
+});
+
+describe("access list (app_users)", () => {
+  it("roster upload makes its managers the allowed list; HR is added/removed via the admin API", async () => {
+    expect((await send("roster", "roster.xlsx")).status).toBe(201);
+    const managers = (await query("SELECT email FROM app_users WHERE role = 'manager'")).rows.map((r) => r.email);
+    const expected = (await query("SELECT DISTINCT lower(btrim(manager_email)) AS e FROM roster_employees WHERE btrim(manager_email) LIKE '%_@_%'")).rows.map((r) => r.e);
+    expect(managers.sort()).toEqual(expected.sort());
+    expect(managers.length).toBeGreaterThan(0);
+
+    const add = (email: string) => fetch(`${base}/api/admin/users`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email }) });
+    expect((await add("  HR.One@LiveRamp.com ")).status).toBe(201);
+    expect((await add("hr.one@liveramp.com")).status).toBe(400); // duplicate
+    expect((await add("nope")).status).toBe(400);
+    expect((await add(managers[0])).status).toBe(400); // already a manager
+
+    await send("roster", "roster.xlsx"); // re-upload keeps HR
+    const roles = (await get("/admin/users")) as { email: string; role: string }[];
+    expect(roles.find((u) => u.email === "hr.one@liveramp.com")?.role).toBe("hr");
+
+    expect((await fetch(`${base}/api/admin/users/hr.one@liveramp.com`, { method: "DELETE" })).status).toBe(204);
+    expect((await fetch(`${base}/api/admin/users/${managers[0]}`, { method: "DELETE" })).status).toBe(404);
+  });
+});
+
+describe("access lookup: email OR username", () => {
+  it("matches a row on either column against any identifier from the token", async () => {
+    const { findUser } = await import("../src/services/users.js");
+    const m = ds.manager;
+    await query("INSERT INTO app_users (email, username, role) VALUES ('a.person@x.com', NULL, 'hr'), ('b.person@x.com', 'bperson', 'hr'), ('top@x.com', 'topuser', 'superadmin')");
+    // token carries login + email claim; row has only an email
+    expect((await findUser(m, ["jdoe", "a.person@x.com"]))?.email).toBe("a.person@x.com");
+    // row matched by its username (login), email claim is something else entirely
+    expect((await findUser(m, ["bperson", "other@elsewhere.com"]))?.email).toBe("b.person@x.com");
+    // a row's email can match the token's *login* (login looks like an address), the case seen in the preview org
+    expect((await findUser(m, ["b.person@x.com", "unrelated@x.com"]))?.email).toBe("b.person@x.com");
+    // nothing matches / no identifiers
+    expect(await findUser(m, ["nobody", "nobody@x.com"])).toBeNull();
+    expect(await findUser(m, [])).toBeNull();
+    // two rows match different identifiers: the higher role wins
+    expect((await findUser(m, ["a.person@x.com", "topuser"]))?.role).toBe("superadmin");
+  });
+
+  it("admin API: optional username, rejects duplicate email or username, lower-cases, DB enforces lower-case", async () => {
+    const add = (body: object) => fetch(`${base}/api/admin/users`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const ok = await add({ email: "New.HR@X.com", username: "  NewHR " });
+    expect(ok.status).toBe(201);
+    expect(await ok.json()).toMatchObject({ email: "new.hr@x.com", username: "newhr", role: "hr" });
+    expect((await add({ email: "other@x.com", username: "newhr" })).status).toBe(400); // username taken
+    expect((await add({ email: "x2@x.com", username: "b person" })).status).toBe(400); // spaces
+    expect((await add({ email: "new.hr@x.com" })).status).toBe(400); // email taken
+    expect((await add({ email: "no.username@x.com" })).status).toBe(201); // username optional
+    await expect(query("INSERT INTO app_users (email, username, role) VALUES ('c@x.com', 'MixedCase', 'hr')")).rejects.toThrow();
   });
 });

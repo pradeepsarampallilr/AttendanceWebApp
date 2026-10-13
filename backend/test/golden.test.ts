@@ -1,3 +1,4 @@
+/** Checks that the attendance results match the saved expected results from the original Python version. */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { buildAttendanceDataset } from "../src/engine/dataset.js";

@@ -1,3 +1,4 @@
+/** Stores hand-made changes to whether someone attended on a Wednesday. */
 import { Column, Entity, PrimaryColumn } from "typeorm";
 
 @Entity("wednesday_overrides")

@@ -1,9 +1,13 @@
+/**
+ * Users see the month's attendance in tabs (per employee, all employees, managers, full log).
+ * They can search, filter by shift, week or compliance.
+ */
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, attendanceApi } from '../api';
 import { useAsync } from '../useAsync';
 import { distinctShifts, filterEmployees, scopeToWeek, summarizeEmployees, totals } from '../lib/attendance';
-import { Card, Empty, hrs } from '../components/dashboard/shared';
+import { Card, Empty, Loading, hrs } from '../components/dashboard/shared';
 import EmployeeTab from '../components/dashboard/EmployeeTab';
 import DirectoryTab from '../components/dashboard/DirectoryTab';
 import ManagerTab from '../components/dashboard/ManagerTab';
@@ -11,7 +15,7 @@ import LedgerTab from '../components/dashboard/LedgerTab';
 
 const TABS = [
   ['employee', 'Per Employee Daily Work Hours'],
-  ['directory', 'All Employees Directory'],
+  ['directory', 'All Employees Details'],
   ['managers', 'Manager & Team Metrics'],
   ['ledger', 'Complete Attendance & Daily Log'],
 ] as const;
@@ -49,7 +53,7 @@ export default function DashboardPage({ month }: { month: string }) {
   const jump = (id: string) => set({ tab: 'employee', emp: id });
 
   if (!month) return <Empty text="Nothing Processed yet, upload and process first!" />;
-  if (months.loading || att.loading) return <p className="text-sm text-slate-500">Loading…</p>;
+  if (months.loading || att.loading) return <Loading />;
   if (months.error || att.error) return <p className="text-sm text-red-600">Error: {months.error ?? att.error}</p>;
   if (!processed) return <Empty text={`${month} has not been processed. Process this month first (Upload page).`} />;
   if (!all.length) return <Empty text={`No attendance rows for ${month}.`} />;

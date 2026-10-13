@@ -1,3 +1,9 @@
+/**
+ * Talks to the server: all the requests the website makes (uploads, months, attendance, access list, downloads).
+ * Also defines the shapes of the data that comes back.
+ */
+import { getAccessToken, oktaAuth } from './auth';
+
 export type UploadKind = 'roster' | 'movement' | 'transport';
 
 export interface UploadResult {
@@ -59,14 +65,70 @@ const json = (method: string, body?: object): RequestInit => ({
   body: body && JSON.stringify(body),
 });
 
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
+
+function mayRedirectFor401(): boolean {
+  const KEY = 'attendance.last401Redirect';
+  if (Date.now() - Number(sessionStorage.getItem(KEY) ?? 0) < 60_000) return false;
+  sessionStorage.setItem(KEY, String(Date.now()));
+  return true;
+}
+
+async function authFetch(url: string, init: RequestInit = {}, noRedirect = false): Promise<Response> {
+  const token = await getAccessToken();
+  const headers = new Headers(init.headers);
+  if (token) headers.set('authorization', `Bearer ${token}`);
+  const res = await fetch(url, { ...init, headers });
+  if (res.status === 401 && oktaAuth && !noRedirect && mayRedirectFor401()) {
+    oktaAuth.tokenManager.clear();
+    oktaAuth.setOriginalUri(window.location.pathname + window.location.search);
+    await oktaAuth.signInWithRedirect();
+  }
+  return res;
+}
+
+export async function downloadFile(url: string, fallbackName: string): Promise<void> {
+  const res = await authFetch(url);
+  if (!res.ok) throw new Error(`Download failed (${res.status})`);
+  const name = /filename="?([^";]+)"?/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? fallbackName;
+  const href = URL.createObjectURL(await res.blob());
+  const a = Object.assign(document.createElement('a'), { href, download: name });
+  a.click();
+  URL.revokeObjectURL(href);
+}
+
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number, readonly email?: string, readonly reason?: string, readonly identifiers?: string[]) {
+    super(message);
+  }
+}
+
+async function request<T>(url: string, init?: RequestInit, noRedirect = false): Promise<T> {
+  const res = await authFetch(url, init, noRedirect);
   const body = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(body?.error ?? `Request failed (${res.status})`);
+  if (!res.ok) throw new ApiError(body?.error ?? `Request failed (${res.status})`, res.status, body?.email, body?.reason, body?.identifiers);
   return body as T;
 }
 
+export type Role = 'superadmin' | 'hr' | 'manager';
+export interface Me {
+  email: string | null;
+  role: Role | null;
+}
+export interface AppUserRow {
+  email: string;
+  username: string | null;
+  name: string;
+  role: Role;
+}
+
+export const accessApi = {
+  list: () => request<AppUserRow[]>('/api/admin/users'),
+  addHr: (email: string, username: string) => request<AppUserRow>('/api/admin/users', json('POST', { email, username })),
+  remove: (email: string) => request<null>(`/api/admin/users/${encodeURIComponent(email)}`, { method: 'DELETE' }),
+};
+
 export const api = {
+  me: () => request<Me>('/api/me', undefined, true),
   uploads: () => request<UploadRow[]>('/api/uploads'),
   months: () => request<MonthRow[]>('/api/months'),
   upload: (kind: UploadKind, file: File) => {
@@ -93,7 +155,6 @@ export const api = {
   saveHolidays: (ym: string, dates: string[]) => request<string[]>(`/api/months/${ym}/holidays`, json('PUT', { dates })),
 };
 
-/** 'YYYY-MM-01' -> '2026-08' */
 export const toYm = (month: string) => month.slice(0, 7);
 
 export type Tri = 'Yes' | 'No' | 'NA';
@@ -107,8 +168,8 @@ export interface AttendanceRow {
   managerEmail: string | null;
   week: number;
   weekAttendedDays: number;
-  workDate: string; // 'YYYY-MM-DD'
-  checkIn: string | null; // naive 'YYYY-MM-DDTHH:MM:SS'
+  workDate: string;
+  checkIn: string | null;
   checkOut: string | null;
   visitHours: number | null;
   dailyTotalHours: number | null;
@@ -116,12 +177,10 @@ export interface AttendanceRow {
   rowsInDayGroup: number;
   shiftLabel: string | null;
   eligibility: 'Yes' | 'No';
-  /** NA = general shift; otherwise Yes/No by presence in the transport sheet. */
   transportOptIn: Tri;
   compliant: Tri;
   weekCompliant: Tri;
   monthCompliant: Tri;
-  /** Set when a manual adjustment overlays this day. */
   adjustment: 'add' | 'edit' | 'delete' | null;
 }
 
@@ -138,11 +197,11 @@ export const attendanceApi = {
 export interface WednesdayEmployee {
   employeeId: string;
   name: string;
-  attended: Record<string, boolean>; // 'YYYY-MM-DD' -> attended
+  attended: Record<string, boolean>;
 }
 export interface WednesdayData {
   wednesdays: string[];
-  holidays: string[]; // subset of `wednesdays` that are public holidays
+  holidays: string[];
   employees: WednesdayEmployee[];
 }
 

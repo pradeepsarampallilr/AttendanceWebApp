@@ -1,7 +1,7 @@
+/** Stores the transport details of employees from the transport sheet. */
 import { Column, Entity, JoinColumn, ManyToOne, PrimaryColumn } from "typeorm";
 import { Upload } from "./Upload.js";
 
-/** Transport details sheet; the latest upload replaces the whole table. */
 @Entity("transport_employees")
 export class TransportEmployee {
   @PrimaryColumn({ name: "employee_id", type: "text", primaryKeyConstraintName: "transport_employees_pkey" })

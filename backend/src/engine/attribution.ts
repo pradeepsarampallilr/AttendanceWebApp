@@ -1,3 +1,7 @@
+/**
+ * Matches each check-in with its checkout and flags missing or stray swipes.
+ * Then works out which work day each visit belongs to and how many hours were worked.
+ */
 import {
   DAY_ATTRIBUTION_BUFFER_MIN, HOUR_MS, MAX_SHIFT_DURATION_MS, addDays, dateOf, pyDateTime, round2, type DateStr,
 } from "./core.js";

@@ -1,3 +1,4 @@
+/** Adds the leaves table to the database. */
 import type { MigrationInterface, QueryRunner } from "typeorm";
 
 export class CreateLeaves1700000000001 implements MigrationInterface {

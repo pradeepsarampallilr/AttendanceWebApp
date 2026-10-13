@@ -1,8 +1,8 @@
+/** Stores the calculated attendance for each visit: times, hours and daily totals per employee. */
 import { Check, Column, Entity, Index, PrimaryGeneratedColumn } from "typeorm";
 
 type Tri = "Yes" | "No" | "NA";
 
-/** Computed output: one row per visit, same columns as the Attendance sheet. */
 @Entity("attendance_visits")
 @Check("attendance_visits_eligibility_check", "eligibility IN ('Yes','No')")
 @Check("attendance_visits_compliant_check", "compliant IN ('Yes','No','NA')")
@@ -53,7 +53,6 @@ export class AttendanceVisit {
   @Column({ name: "visit_hours", type: "numeric", precision: 6, scale: 2, nullable: true })
   visitHours!: number | null;
 
-  /** Repeated on every leg of the day; see isFirstRow. */
   @Column({ name: "daily_total_hours", type: "numeric", precision: 6, scale: 2, nullable: true })
   dailyTotalHours!: number | null;
 
@@ -78,7 +77,6 @@ export class AttendanceVisit {
   @Column({ name: "month_compliant", type: "text" })
   monthCompliant!: Tri;
 
-  /** 'NA' = general shift (not eligible); otherwise 'Yes' if listed in transport_employees, else 'No'. */
   @Column({ name: "transport_opt_in", type: "text", default: "NA" })
   transportOptIn!: Tri;
 }

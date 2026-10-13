@@ -1,3 +1,4 @@
+/** Creates the first set of database tables for the app. */
 import type { MigrationInterface, QueryRunner } from "typeorm";
 
 /**

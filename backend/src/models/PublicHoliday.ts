@@ -1,6 +1,6 @@
+/** Stores the public holiday dates picked for each month. */
 import { Column, Entity, Index, PrimaryColumn } from "typeorm";
 
-/** Public holidays picked on the Upload page's calendar. One row per date; month is the first day of its month. */
 @Entity("public_holidays")
 @Index("public_holidays_month_idx", ["month"])
 export class PublicHoliday {

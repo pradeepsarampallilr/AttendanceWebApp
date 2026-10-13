@@ -1,3 +1,4 @@
+/** Checks that a leave file is read correctly and that bad columns or dates are rejected. */
 import { describe, expect, it } from "vitest";
 import { ValidationError, leavesFromTable } from "../src/io/tables.js";
 

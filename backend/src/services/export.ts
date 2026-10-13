@@ -1,3 +1,6 @@
+/**
+ * Builds the Excel download of the attendance results.
+ */
 import ExcelJS from "exceljs";
 import { MONTH_NAMES, fmtDate, fmtWeekday } from "../engine/core.js";
 import type { ApiRow } from "./adjustments.js";

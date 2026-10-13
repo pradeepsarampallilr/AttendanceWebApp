@@ -1,3 +1,6 @@
+/**
+ * Users upload roster, movement and transport files, set holidays and leaves, process or delete a month, and see upload history.
+ */
 import { useEffect, useState } from 'react';
 import { api, toYm, type ProcessResult, type UploadKind } from '../api';
 import { useAsync } from '../useAsync';

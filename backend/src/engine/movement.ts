@@ -1,14 +1,12 @@
+/**
+ * Reads the door swipe (movement) rows into check-in and check-out events per employee.
+ * Also finds the month covered and carries over swipes from earlier days.
+ */
 import { addDays, dateOf, mkDateTime, type DateStr } from "./core.js";
 import type { EventsByEmployee, SwipeEvent } from "./types.js";
 
-/** Column index of the first in/out slot in a movement row (SrNo,EmpCode,Name,TransDate,Controller,Door,in,...). */
 export const SWIPE_START_COL = 6;
 
-/**
- * Flatten movement rows (each: array of cell values, last cell = vendor 'Work Hrs', ignored)
- * into per-employee events, globally sorted by real timestamp. Slot kind comes from the
- * column's position (even=in, odd=out), never from row order.
- */
 export function parseMovementRows(rows: unknown[][]): EventsByEmployee {
   const events: EventsByEmployee = new Map();
   for (const row of rows) {
@@ -52,7 +50,6 @@ export function carryoverFromEvents(all: EventsByEmployee): EventsByEmployee {
   return out;
 }
 
-/** (year, month) with most swipe activity; ties resolved by first-seen order. */
 export function inferMonthBounds(events: EventsByEmployee): { year: number; month: number } {
   const counts = new Map<string, number>();
   for (const list of events.values()) for (const e of list) {

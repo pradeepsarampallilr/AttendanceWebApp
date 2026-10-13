@@ -1,3 +1,4 @@
+/** Checks that manual hour edits, deletes and additions change the daily rows correctly. */
 import { describe, expect, it } from "vitest";
 import { applyAdjustments, type ApiRow } from "../src/services/adjustments.js";
 

@@ -1,6 +1,6 @@
+/** Stores hours that someone added, edited or deleted by hand for a day. */
 import { Check, Column, Entity, PrimaryGeneratedColumn, Unique } from "typeorm";
 
-/** Dashboard add/edit/delete of daily hours. Kept apart from computed rows so a re-run never erases them. */
 @Entity("manual_adjustments")
 @Check("manual_adjustments_action_check", "action IN ('add', 'edit', 'delete')")
 @Unique("manual_adjustments_employee_id_work_date_key", ["employeeId", "workDate"])

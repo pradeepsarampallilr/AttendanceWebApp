@@ -1,3 +1,7 @@
+/**
+ * Works out Wednesday office attendance: days attended, rates, tiers (Perfect to Zero), search and totals.
+ * Public holidays are not counted.
+ */
 import type { WednesdayData } from '../api';
 
 /** Spec: each attended Wednesday is logged as an estimated 8.0 in-office hours. */

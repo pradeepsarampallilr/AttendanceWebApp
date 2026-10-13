@@ -1,7 +1,7 @@
+/** Stores the raw in and out swipes from the uploaded movement files. */
 import { Check, Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
 import { Upload } from "./Upload.js";
 
-/** Raw flattened swipes. Wall-clock times, so timestamp WITHOUT time zone. Duplicates are kept (no natural key). */
 @Entity("swipe_events")
 @Check("swipe_events_kind_check", "kind IN ('in', 'out')")
 @Index("swipe_events_at_idx", ["at"])

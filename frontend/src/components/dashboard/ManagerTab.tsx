@@ -1,3 +1,6 @@
+/**
+ * Dashboard tab showing one manager's team: totals and a searchable, sortable list of team members.
+ */
 import { useState } from 'react';
 import { BENCHMARK_HOURS, pct, summarizeManagers, type EmployeeSummary } from '../../lib/attendance';
 import { Badge, Card, Empty, SortTh, hrs, td, th, useSort } from './shared';

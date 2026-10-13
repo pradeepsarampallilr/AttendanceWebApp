@@ -1,3 +1,4 @@
+/** Stores the employee list: name, email, department, manager and shift. */
 import { Column, Entity, JoinColumn, ManyToOne, PrimaryColumn } from "typeorm";
 import { Upload } from "./Upload.js";
 

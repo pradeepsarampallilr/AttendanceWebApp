@@ -1,3 +1,4 @@
+/** Stores a record of each uploaded file: type, name, month, rows and status. */
 import { Check, Column, Entity, PrimaryGeneratedColumn } from "typeorm";
 
 export type UploadKind = "movement" | "roster" | "transport";

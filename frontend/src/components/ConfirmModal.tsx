@@ -1,3 +1,6 @@
+/**
+ * A pop-up box that asks the user to confirm or cancel an action. Esc closes it.
+ */
 import { useEffect, type ReactNode } from 'react';
 
 export default function ConfirmModal({ title, children, confirmLabel, busy, onConfirm, onCancel }: {

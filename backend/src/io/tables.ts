@@ -1,3 +1,7 @@
+/**
+ * Reads uploaded Excel or CSV files (roster, movement, transport, leaves) and checks their columns.
+ * Also builds the blank template files people can download.
+ */
 import ExcelJS from "exceljs";
 import { parse as parseCsv } from "csv-parse/sync";
 import { buildRoster, type RawRosterRow, type RosterResult } from "../engine/roster.js";
@@ -15,7 +19,6 @@ function plain(v: ExcelJS.CellValue): unknown {
   return v;
 }
 
-/** Read the first worksheet (or a named one) of an xlsx, or a csv, as dense rows of cell values. */
 export async function readTable(buf: Buffer, filename: string, sheetName?: string): Promise<unknown[][]> {
   if (/\.csv$/i.test(filename)) {
     return parseCsv(buf, { relax_column_count: true, skip_empty_lines: false }) as string[][];
@@ -34,19 +37,15 @@ export async function readTable(buf: Buffer, filename: string, sheetName?: strin
   return rows;
 }
 
-/** Header text without surrounding whitespace or the trailing '*' that templates use to mark required columns. */
 const stripStar = (v: unknown) => String(v ?? "").trim().replace(/\s*\*$/, "");
 
 export function rosterFromTable(rows: unknown[][]): RosterResult {
-  // Columns: Work Shift, Shit timing, Emplid, Legal Name, Department, Worker Type, Sub-Type,
-  //          Email, Hire Date, Manager, Transport, Current Shift Timing
   const raw: RawRosterRow[] = rows.slice(1).map((r) => ({
     baseShift: r[1], emplid: r[2], name: r[3], department: r[4], email: r[7], manager: r[9], overrideShift: r[11],
   }));
   return buildRoster(raw);
 }
 
-/** Locates the 'EmpCode' header row and keeps rows up to the 'Work Hrs' column (inclusive). */
 function movementBody(rows: unknown[][]): unknown[][] {
   const headerIdx = rows.slice(0, 10).findIndex((r) => stripStar(r[1]) === "EmpCode");
   if (headerIdx < 0) throw new Error("Could not locate the EmpCode header row in movement file");
@@ -58,7 +57,7 @@ function movementBody(rows: unknown[][]): unknown[][] {
 
 export const eventsFromMovementTable = (rows: unknown[][]): EventsByEmployee => parseMovementRows(movementBody(rows));
 
-/** employeeId -> name as printed in the movement file (for staff missing from the roster). */
+
 export function fallbackNamesFromTable(rows: unknown[][]): Map<string, string> {
   const names = new Map<string, string>();
   for (const body of movementBody(rows)) {
@@ -71,11 +70,10 @@ export function fallbackNamesFromTable(rows: unknown[][]): Map<string, string> {
 export class ValidationError extends Error {}
 
 const ROSTER_COLUMNS: [number, string][] = [
-  [1, "shit timing"], [2, "emplid"], [3, "legal name"], [4, "department"],
+  [1, "shift timing"], [2, "emplid"], [3, "legal name"], [4, "department"],
   [7, "email"], [9, "manager"], [11, "current shift timing"],
 ];
 
-/** Throws ValidationError unless the first row has the roster columns the importer reads by position. */
 export function assertRosterHeader(rows: unknown[][]) {
   const header = rows[0] ?? [];
   const bad = ROSTER_COLUMNS.filter(([i, name]) => stripStar(header[i]).toLowerCase() !== name);
@@ -84,7 +82,6 @@ export function assertRosterHeader(rows: unknown[][]) {
   }
 }
 
-/** Throws ValidationError unless an 'EmpCode' header row is found in the first 10 rows. */
 export function assertMovementHeader(rows: unknown[][]) {
   if (!rows.slice(0, 10).some((r) => stripStar(r[1]) === "EmpCode")) {
     throw new ValidationError("Movement file must contain an 'EmpCode' header row (in column B, within the first 10 rows)");
@@ -108,7 +105,6 @@ const TRANSPORT_COLUMNS: [string, keyof TransportRow][] = [
 
 const cell = (v: unknown) => (v instanceof Date ? v.toISOString().slice(0, 10) : v == null ? "" : String(v).trim());
 
-/** Parses the transport sheet by header name (column order is free); throws ValidationError on missing columns. */
 export function transportFromTable(rows: unknown[][]): TransportRow[] {
   const header = (rows[0] ?? []).map((h) => stripStar(cell(h)).toLowerCase());
   const index = new Map<keyof TransportRow, number>();
@@ -140,7 +136,6 @@ const LEAVE_COLUMNS: { field: keyof LeaveRow; names: string[]; required: boolean
   { field: "leaveDescription", names: ["description", "leave description", "reason", "leave type"], required: false },
 ];
 
-/** Parses a leaves sheet by header name: Employee ID + Leave Date required; Employee Name / Description optional. One row per leave day. */
 export function leavesFromTable(rows: unknown[][]): LeaveRow[] {
   const header = (rows[0] ?? []).map((h) => stripStar(cell(h)).toLowerCase());
   const index = new Map<keyof LeaveRow, number>();
@@ -168,11 +163,10 @@ export function leavesFromTable(rows: unknown[][]): LeaveRow[] {
 
 export type TemplateKind = "roster" | "movement" | "transport" | "leaves";
 
-/** Template headers; a trailing '*' marks a required column (the importers ignore it). */
 const TEMPLATES: Record<TemplateKind, { sheet: string; header: string[]; sample: unknown[] }> = {
   roster: {
     sheet: "Employee Details",
-    header: ["Work Shift", "Shit timing", "Emplid*", "Legal Name*", "Department", "Worker Type", "Sub-Type", "Email", "Hire Date", "Manager", "Transport", "Current Shift Timing"],
+    header: ["Work Shift", "Shift Timing", "Emplid*", "Legal Name*", "Department", "Worker Type", "Sub-Type", "Email", "Hire Date", "Manager", "Transport", "Current Shift Timing"],
     sample: ["General", "9:00 AM - 6:30 PM", 100123, "Jane Doe", "Engineering", "Employee", "Regular", "jane.doe@example.com", "2022-04-01", "John Smith", "No", ""],
   },
   movement: {
@@ -194,7 +188,6 @@ const TEMPLATES: Record<TemplateKind, { sheet: string; header: string[]; sample:
 
 export const isTemplateKind = (k: string): k is TemplateKind => Object.hasOwn(TEMPLATES, k);
 
-/** Builds a one-sheet xlsx template: bold header (required columns end in '*') and one example row. */
 export async function buildTemplate(kind: TemplateKind): Promise<Buffer> {
   const { sheet, header, sample } = TEMPLATES[kind];
   const wb = new ExcelJS.Workbook();

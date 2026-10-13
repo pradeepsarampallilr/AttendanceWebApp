@@ -1,3 +1,4 @@
+/** Handles everything for one month: process, view, edit hours, Wednesdays, holidays, leaves, and Excel export. */
 import { Router } from "express";
 import { And, LessThan, MoreThanOrEqual } from "typeorm";
 import { AppDataSource } from "../db.js";

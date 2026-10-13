@@ -1,3 +1,7 @@
+/**
+ * Builds the full attendance table (one row per person per day) from the roster and swipes.
+ * Calculates hours and compliance for each day.
+ */
 import { COMPLIANT_MIN_HOURS, pyFloat, weekNumberInMonth, workingDaysInMonth, mkDate, type DateStr } from "./core.js";
 import {
   buildWorkDateGroups, groupHasOpenVisit, groupTotalHours, looksLikeOvernightWorker,
@@ -14,16 +18,13 @@ export interface DatasetInput {
   year: number;
   month: number;
   fallbackNames: Map<string, string>;
-  /** Public holidays for the month ('YYYY-MM-DD'); omitted = none. */
   holidays?: ReadonlySet<DateStr>;
-  /** employeeId -> leave dates in the month; subtracted from that employee's working-day denominator like holidays. */
   leaves?: ReadonlyMap<string, ReadonlySet<DateStr>>;
 }
 
 export interface DatasetResult {
   rows: AttendanceRow[];
   issues: AuditIssue[];
-  /** employeeId -> set of attributed work dates (drives the Wednesday sheet) */
   attendedDates: Map<string, Set<DateStr>>;
 }
 
@@ -77,7 +78,6 @@ export function buildAttendanceDataset(input: DatasetInput): DatasetResult {
       weeklyDays.set(w, (weeklyDays.get(w) ?? 0) + 1);
       let s = attendedPerWeek.get(w);
       if (!s) attendedPerWeek.set(w, (s = new Set()));
-      // Only a full day (>= minimum hours) counts toward the weekly 3-day minimum and the Wednesday check.
       const total = groupTotalHours(g);
       if (total !== null && total >= COMPLIANT_MIN_HOURS) s.add(g.workDate);
     }

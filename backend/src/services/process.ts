@@ -1,3 +1,6 @@
+/**
+ * Processes a month: loads the saved roster and swipes, works out attendance, and saves the results.
+ */
 import { And, LessThan, MoreThanOrEqual } from "typeorm";
 import { AppDataSource } from "../db.js";
 import { buildAttendanceDataset } from "../engine/dataset.js";

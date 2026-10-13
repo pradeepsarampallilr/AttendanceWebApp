@@ -1,3 +1,4 @@
+/** Accepts uploaded roster, movement and transport files, and lists past uploads. */
 import { Router } from "express";
 import multer from "multer";
 import { AppDataSource } from "../db.js";
@@ -6,6 +7,7 @@ import {
   ValidationError, assertMovementHeader, assertRosterHeader, eventsFromMovementTable,
   fallbackNamesFromTable, readTable, rosterFromTable, transportFromTable,
 } from "../io/tables.js";
+import { syncManagers } from "../services/users.js";
 import { RosterEmployee, TransportEmployee, Upload } from "../models/index.js";
 import { insertChunked, insertSwipeEvents, monthStart, refreshTransportOptIn } from "../services/store.js";
 
@@ -27,7 +29,6 @@ uploadsRouter.post("/", upload.single("file"), async (req, res) => {
     throw new ValidationError(`Could not read ${file.originalname}: ${(e as Error).message}`);
   }
 
-  // One transaction per upload: any failure (validation included) rolls the whole thing back.
   const result = await AppDataSource.transaction(async (m) => {
     if (kind === "transport") {
       const list = transportFromTable(table);
@@ -49,6 +50,7 @@ uploadsRouter.post("/", upload.single("file"), async (req, res) => {
         managerName: e.managerName, managerEmail: e.managerEmail,
         shiftLabel: e.shift?.label ?? null, shiftStartMin: e.shift?.startMinutes ?? null, shiftEndMin: e.shift?.endMinutes ?? null,
         uploadId: u.id })));
+      await syncManagers(m, [...roster.values()]); // managers in the roster become the allowed list
       return { id: u.id, kind, filename: u.filename, employees: roster.size };
     }
     assertMovementHeader(table);
@@ -56,7 +58,6 @@ uploadsRouter.post("/", upload.single("file"), async (req, res) => {
     if (!events.size) throw new ValidationError("Movement file contains no swipe events");
     const { year, month } = inferMonthBounds(events);
     const ms = monthStart(year, month);
-    // Re-uploading a month replaces its earlier upload (and, via cascade, that upload's swipes).
     await m.delete(Upload, { kind: "movement", month: ms });
     const u = await m.save(m.create(Upload, { kind: "movement", filename: file.originalname, month: ms }));
     const count = await insertSwipeEvents(m, u.id, events, fallbackNamesFromTable(table));

@@ -1,3 +1,7 @@
+/**
+ * Turns the employee roster rows into shift times and employee details.
+ * Reads shift text like "9:00 AM - 6:30 PM" into start and end times.
+ */
 import type { RosterEntry, ShiftWindow } from "./types.js";
 
 export const GENERAL_SHIFT_LABEL = "9:00 AM - 6:30 PM";
@@ -26,7 +30,6 @@ function minutesToLabel(mins: number): string {
   return `${h12}:${String(mins % 60).padStart(2, "0")} ${h24 < 12 ? "AM" : "PM"}`;
 }
 
-/** Parses '4:00 pm to 1:30 am' or '6:00 PM - 3:30 AM'. */
 export function parseShiftTimingString(raw: string): ShiftWindow {
   const trimmed = raw.trim();
   const m = /\s*(?:to|-|–)\s*/i.exec(trimmed);
@@ -38,7 +41,6 @@ export function parseShiftTimingString(raw: string): ShiftWindow {
   return { startMinutes, endMinutes, label: `${minutesToLabel(startMinutes)} - ${minutesToLabel(endMinutes)}` };
 }
 
-/** One raw roster sheet row (first 12 columns), already read from xlsx/csv. */
 export interface RawRosterRow {
   baseShift: unknown; emplid: unknown; name: unknown; department: unknown;
   email: unknown; manager: unknown; overrideShift: unknown;

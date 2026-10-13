@@ -1,3 +1,6 @@
+/**
+ * Shared data shapes for shifts, roster entries, swipes, visits, issues and attendance rows.
+ */
 import type { DateStr } from "./core.js";
 
 export interface ShiftWindow {

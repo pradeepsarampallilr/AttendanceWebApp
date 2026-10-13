@@ -1,3 +1,4 @@
+/** Checks that holidays and leaves are handled correctly when counting working days and Wednesdays. */
 import { describe, expect, it } from "vitest";
 import { workingDaysInMonth } from "../src/engine/core.js";
 import { evaluateWeekCompliance } from "../src/engine/policy.js";
