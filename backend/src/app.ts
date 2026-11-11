@@ -3,30 +3,62 @@
  */
 import { existsSync } from "node:fs";
 import path from "node:path";
-import express, { type ErrorRequestHandler } from "express";
+import express, { type ErrorRequestHandler, type RequestHandler } from "express";
 import { oktaAuth } from "./auth.js";
-import { AppDataSource } from "./db.js";
 import { ValidationError, buildTemplate, isTemplateKind } from "./io/tables.js";
 import { adminRouter } from "./routes/admin.js";
 import { leavesRouter } from "./routes/leaves.js";
 import { monthsRouter } from "./routes/months.js";
 import { uploadsRouter } from "./routes/uploads.js";
 import { NotFoundError } from "./services/process.js";
-import cors from 'cors';
+import cors from "cors";
+import { getRules } from "./engine/rules.js";
+import { myEmployeeId, requireWrite, teamLines } from "./services/access.js";
+
+const securityHeaders: RequestHandler = (_req, res, next) => {
+  res.set({
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Strict-Transport-Security": "max-age=15552000; includeSubDomains",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.okta.com https://*.oktapreview.com; frame-ancestors 'none'; base-uri 'self'",
+  });
+  next();
+};
+
+/** Fixed-window request cap per client address (in memory, so per server process). */
+function rateLimit(perMinute: number): RequestHandler {
+  const hits = new Map<string, { n: number; reset: number }>();
+  return (req, res, next) => {
+    const now = Date.now();
+    for (const [k, v] of hits) if (v.reset < now) hits.delete(k);
+    const key = req.ip ?? "";
+    const h = hits.get(key) ?? { n: 0, reset: now + 60_000 };
+    hits.set(key, h);
+    if (++h.n > perMinute) return void res.status(429).json({ error: "Too many requests, try again in a minute" });
+    next();
+  };
+}
 
 export function createApp() {
   const app = express();
-  app.use(express.json());
-  app.use(cors());
+  app.disable("x-powered-by");
+  app.use(securityHeaders);
+  app.use(express.json({ limit: "1mb" }));
+  // Browsers on other origins are refused unless listed in CORS_ORIGIN (comma separated). The built site is same-origin.
+  const origins = (process.env.CORS_ORIGIN ?? "").split(",").map((o) => o.trim()).filter(Boolean);
+  app.use(cors({ origin: origins.length ? origins : false }));
+  app.use("/api", rateLimit(600));
 
-  app.get("/api/health", async (_req, res) => {
-    const [{ now }] = await AppDataSource.query("SELECT now() AS now");
-    res.json({ ok: true, dbTime: now });
-  });
+  app.get("/api/health", (_req, res) => void res.json({ ok: true }));
   app.use("/api", oktaAuth());
-  app.get("/api/me", (req, res) => void res.json({ email: req.userEmail ?? null, role: req.userRole ?? null }));
-  app.get("/api/templates/:kind", async (req, res) => {
-    const kind = req.params.kind.replace(/\.xlsx$/i, "");
+  app.get("/api/me", async (req, res) => void res.json({ email: req.userEmail ?? null, role: req.userRole ?? null, employeeId: await myEmployeeId(req) }));
+  /** Reporting lines the caller may see (manager above employee, at any depth), with the manager's roster name. */
+  app.get("/api/team", async (req, res) => void res.json(await teamLines(req)));
+  app.get("/api/rules", (_req, res) => void res.json(getRules()));
+  app.get("/api/templates/:kind", requireWrite, async (req, res) => {
+    const kind = String(req.params.kind).replace(/\.xlsx$/i, "");
     if (!isTemplateKind(kind)) throw new NotFoundError(`Unknown template: ${kind}`);
     res.attachment(`${kind}-template.xlsx`).type("xlsx").send(await buildTemplate(kind));
   });

@@ -12,20 +12,21 @@ declare module "express-serve-static-core" {
     user?: JWTPayload;
     userEmail?: string;
     userRole?: AppRole;
+    userEmployeeId?: string | null;
   }
 }
 
-// The API is open if OKTA_ISSUER is unset.
 export function oktaAuth(): RequestHandler {
   const issuer = process.env.OKTA_ISSUER?.replace(/\/$/, "");
   if (!issuer) {
-    console.warn("Okta auth is DISABLED (OKTA_ISSUER not set): the API is open. Fine for local demos, never for production.");
-    return (_req, _res, next) => next();
+    if (process.env.NODE_ENV === "production") throw new Error("OKTA_ISSUER must be set in production: refusing to start with authentication disabled.");
+    console.warn("Okta auth DISABLED: OKTA_ISSUER is not set; every request acts as a local superadmin (development only).");
+    return (req, _res, next) => {
+      req.userEmail = "dev@local";
+      req.userRole = "superadmin";
+      next();
+    };
   }
-  if (!URL.canParse(issuer) || issuer.includes("<")) {
-    throw new Error(`OKTA_ISSUER is not a valid URL ("${issuer}"). Set the real issuer from your Okta admin, or leave it empty to run without Okta.`);
-  }
-
   const orgServer = !new URL(issuer).pathname.includes("/oauth2");
   const audience = orgServer ? process.env.OKTA_CLIENT_ID : (process.env.OKTA_AUDIENCE ?? "api://default");
   if (!audience) throw new Error("OKTA_ISSUER is the Okta org server, so OKTA_CLIENT_ID (the SPA's client id) is required: it is the ID token's audience.");
@@ -56,9 +57,11 @@ export function oktaAuth(): RequestHandler {
     const ids = [...new Set(raw.map(norm).filter(Boolean))];
     const user = await findUser(AppDataSource.manager, ids);
     if (!user) return void res.status(403).json({ error: "Access denied", email: ids[0] ?? "", identifiers: ids });
+    if (!user.isActive) return void res.status(403).json({ error: "Account deactivated", email: user.email });
     req.user = payload;
     req.userEmail = user.email;
     req.userRole = user.role;
+    req.userEmployeeId = user.employeeId;
     next();
   };
 }

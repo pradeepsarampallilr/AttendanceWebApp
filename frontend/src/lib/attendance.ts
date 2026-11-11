@@ -1,7 +1,7 @@
 /**
  * Works out attendance numbers from raw rows: hours per employee, manager totals, search and filters, and the grouped log.
  */
-import type { AttendanceRow, Tri } from '../api';
+import type { AttendanceRow, TeamLine, Tri, WeeklyRow } from '../api';
 
 export const BENCHMARK_HOURS = 7.0;
 
@@ -20,7 +20,7 @@ export interface EmployeeSummary {
   department: string | null;
   managerName: string | null;
   shift: string | null;
-  eligibility: 'Yes' | 'No';
+  eligibility: Tri;
   monthCompliant: Tri;
   transportOptIn: Tri;
   /** Set by scopeToWeek while a week / weekly-compliance filter is active; badges show it instead of the month status. */
@@ -37,6 +37,7 @@ export interface EmployeeSummary {
 }
 
 export interface ManagerSummary {
+  managerId: string;
   managerName: string;
   department: string | null;
   teamSize: number;
@@ -45,7 +46,10 @@ export interface ManagerSummary {
   avgHours: number;
   compliantDays: number;
   evaluatedDays: number;
+  /** Everyone below this manager at any level (reports of reports included). */
   members: EmployeeSummary[];
+  /** Reporting level of each member: 1 = direct report, 2 = report of a report, and so on. */
+  depth: Map<string, number>;
 }
 
 export interface Totals {
@@ -95,19 +99,23 @@ export function summarizeEmployees(rows: AttendanceRow[]): EmployeeSummary[] {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function summarizeManagers(emps: EmployeeSummary[]): ManagerSummary[] {
+/** Groups each manager's whole reporting tree (every level below them) from the stored reporting lines, matched by employee id. */
+export function summarizeManagers(emps: EmployeeSummary[], lines: TeamLine[]): ManagerSummary[] {
+  const byId = new Map(emps.map((e) => [e.employeeId, e]));
   const map = new Map<string, ManagerSummary>();
-  for (const e of emps) {
-    if (!e.managerName) continue;
-    let m = map.get(e.managerName);
+  for (const l of lines) {
+    const e = byId.get(l.employeeId);
+    if (!e) continue; // no attendance rows for this person
+    let m = map.get(l.managerId);
     if (!m) {
       m = {
-        managerName: e.managerName, department: e.department, teamSize: 0, totalHours: 0,
-        loggedDays: 0, avgHours: 0, compliantDays: 0, evaluatedDays: 0, members: [],
+        managerId: l.managerId, managerName: l.managerName, department: byId.get(l.managerId)?.department ?? e.department, teamSize: 0,
+        totalHours: 0, loggedDays: 0, avgHours: 0, compliantDays: 0, evaluatedDays: 0, members: [], depth: new Map(),
       };
-      map.set(e.managerName, m);
+      map.set(l.managerId, m);
     }
     m.members.push(e);
+    m.depth.set(e.employeeId, l.depth);
     m.teamSize++;
     m.totalHours += e.totalHours;
     m.loggedDays += e.loggedDays;
@@ -151,29 +159,27 @@ export function filterEmployees(emps: EmployeeSummary[], q: string, shift: strin
 }
 
 /**
- * Narrows employees to one week of the month (`week` = '' keeps the whole month) and/or a weekly compliance status.
- * With a week selected, each employee's rows/hours/days are limited to that week, so the cards, charts and tables
- * show that week only. Employees with no attendance that week are kept as empty summaries: the engine emits no row
- * for them, but an eligible one is weekly "No" (fewer than 3 days) and an ineligible one is "NA".
+ * Narrows employees to one calendar week (`week` = '' keeps the whole month) and/or a weekly compliance status.
+ * The status comes from the server's weekly results, which also cover weeks with no swipes. With a week selected,
+ * each employee's rows/hours/days are limited to that week; employees with no attendance that week stay as empty
+ * summaries so a missed week still shows as non-compliant.
  */
-export function scopeToWeek(all: EmployeeSummary[], rows: AttendanceRow[], week: string, status: string): EmployeeSummary[] {
+export function scopeToWeek(all: EmployeeSummary[], rows: AttendanceRow[], weekly: WeeklyRow[], week: string, status: string): EmployeeSummary[] {
   if (!week && !status) return all;
-  const weeks = week ? [Number(week)] : [...new Set(rows.map((r) => r.week))];
-  // The engine only evaluates weeks an employee attended, so a week with no rows counts as "No" for an eligible
-  // employee (fewer than 3 days). Over several weeks: No = any week failed or missed, else Yes; ineligible = NA.
-  const weekly = (e: EmployeeSummary): Tri => {
-    if (e.eligibility === 'No') return 'NA';
-    const byWeek = new Map(e.rows.map((r) => [r.week, r.weekCompliant]));
-    return weeks.every((w) => byWeek.get(w) === 'Yes') ? 'Yes' : 'No';
+  const byEmp = new Map<string, Tri[]>();
+  for (const w of weekly) if (!week || String(w.week) === week) byEmp.set(w.employeeId, [...(byEmp.get(w.employeeId) ?? []), w.status]);
+  const statusOf = (id: string): Tri => {
+    const list = byEmp.get(id);
+    if (!list?.length || list.includes('NA')) return 'NA';
+    return list.every((s) => s === 'Yes') ? 'Yes' : 'No';
   };
   const scoped = week ? summarizeEmployees(rows.filter((r) => String(r.week) === week)) : all;
-  const out = scoped.map((e) => ({ ...e, weekStatus: weekly(e) })).filter((e) => !status || e.weekStatus === status);
+  const out = scoped.map((e) => ({ ...e, weekStatus: statusOf(e.employeeId) })).filter((e) => !status || e.weekStatus === status);
   if (!week) return out;
   const seen = new Set(scoped.map((e) => e.employeeId));
   for (const e of all) {
-    if (seen.has(e.employeeId)) continue;
-    const implied: Tri = e.eligibility === 'No' ? 'NA' : 'No';
-    if (status && status !== implied) continue;
+    const implied = statusOf(e.employeeId);
+    if (seen.has(e.employeeId) || (status && status !== implied)) continue;
     out.push({ ...e, weekStatus: implied, loggedDays: 0, totalHours: 0, avgHours: 0, sessions: 0, compliantDays: 0, evaluatedDays: 0, days: [], rows: [] });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));

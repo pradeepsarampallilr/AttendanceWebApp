@@ -12,6 +12,9 @@ export const TARGET_RATE = 0.75;
 export interface WedEmployee {
   employeeId: string;
   name: string;
+  email: string;
+  department: string;
+  shift: string | null;
   flags: boolean[]; // aligned with the month's Wednesdays
   days: number;
   rate: number; // days / wednesdays, 0..1
@@ -30,8 +33,7 @@ export function tierOf(days: number, total: number): TierName {
 export function tierOptions(total: number) {
   return Array.from({ length: total + 1 }, (_, i) => {
     const days = total - i;
-    const name = tierOf(days, total);
-    return { days, label: name === 'Zero' ? `Zero Attendance (0/${total})` : `${name} (${days}/${total} Days)` };
+    return { days, label: `${days}/${total} Days` };
   });
 }
 
@@ -45,7 +47,7 @@ export function summarize(data: WednesdayData): WedEmployee[] {
   return data.employees.map((e) => {
     const flags = working.map((w) => e.attended[w] === true);
     const days = flags.filter(Boolean).length;
-    return { employeeId: e.employeeId, name: e.name, flags, days, rate: n ? days / n : 0 };
+    return { employeeId: e.employeeId, name: e.name, email: e.email, department: e.department, shift: e.shift, flags, days, rate: n ? days / n : 0 };
   });
 }
 

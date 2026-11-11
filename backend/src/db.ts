@@ -1,6 +1,3 @@
-/**
- * Sets up the database connection and runs database updates (migrations).
- */
 import "reflect-metadata";
 import "dotenv/config";
 import pg from "pg";
@@ -22,7 +19,7 @@ export const AppDataSource = new DataSource({
   password: process.env.DB_PASSWORD,
   entities,
   migrations,
-  synchronize: false, // schema does change util we run migrations, but we don't want TypeORM to auto-change it at runtime
+  synchronize: false,
 });
 
 export async function migrate() {

@@ -1,12 +1,14 @@
 /**
  * A pop-up box that asks the user to confirm or cancel an action. Esc closes it.
  */
-import { useEffect, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
-export default function ConfirmModal({ title, children, confirmLabel, busy, onConfirm, onCancel }: {
+export default function ConfirmModal({ title, children, confirmLabel, busyLabel = 'Working…', tone = 'danger', busy, onConfirm, onCancel }: {
   title: string;
   children: ReactNode;
   confirmLabel: string;
+  busyLabel?: string;
+  tone?: 'danger' | 'primary';
   busy?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
@@ -25,9 +27,25 @@ export default function ConfirmModal({ title, children, confirmLabel, busy, onCo
         <div className="text-sm text-slate-600 space-y-2">{children}</div>
         <div className="mt-5 flex justify-end gap-2">
           <button className="btn btn-secondary" onClick={onCancel} disabled={busy}>Cancel</button>
-          <button className="btn btn-danger" onClick={onConfirm} disabled={busy}>{busy ? 'Deleting…' : confirmLabel}</button>
+          <button className={`btn ${tone === 'danger' ? 'btn-danger' : 'btn-primary'}`} onClick={onConfirm} disabled={busy} autoFocus>{busy ? busyLabel : confirmLabel}</button>
         </div>
       </div>
     </div>
   );
+}
+
+export type ConfirmOptions = { title: string; message: ReactNode; confirmLabel: string; tone?: 'danger' | 'primary' };
+
+/** `const [ask, modal] = useConfirm();` render `{modal}`, then `ask({...}, () => doIt())` shows the box and runs doIt only on confirm. */
+export function useConfirm() {
+  const [pending, setPending] = useState<{ opts: ConfirmOptions; action: () => unknown } | null>(null);
+  const cancel = useCallback(() => setPending(null), []);
+  const ask = useCallback((opts: ConfirmOptions, action: () => unknown) => setPending({ opts, action }), []);
+  const modal = pending && (
+    <ConfirmModal title={pending.opts.title} confirmLabel={pending.opts.confirmLabel} tone={pending.opts.tone ?? 'primary'}
+      onCancel={cancel} onConfirm={() => { const { action } = pending; setPending(null); action(); }}>
+      {pending.opts.message}
+    </ConfirmModal>
+  );
+  return [ask, modal] as const;
 }

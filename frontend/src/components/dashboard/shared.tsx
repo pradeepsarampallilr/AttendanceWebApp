@@ -1,7 +1,7 @@
 /**
  * Small pieces used across dashboard pages: messages, loading and empty states, sortable table headers, pagers and date/hour formatting.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Tri } from '../../api';
 import { BENCHMARK_HOURS } from '../../lib/attendance';
 
@@ -24,6 +24,23 @@ export function Notice({ tone, onClose, className = '', children }: {
     <div role={tone === 'error' ? 'alert' : undefined} className={`text-sm border rounded p-2 flex items-start gap-2 ${NOTICE_TONE[tone]} ${className}`}>
       <span className="flex-1">{children}</span>
       <button aria-label="Dismiss" onClick={onClose} className="leading-none px-1 hover:bg-black/5 rounded">×</button>
+    </div>
+  );
+}
+
+/** Top-right popup message that dismisses itself after `timeout` ms, or sooner via the × button. */
+export function Toast({ tone, onClose, timeout = 5000, children }: {
+  tone: keyof typeof NOTICE_TONE; onClose: () => void; timeout?: number; children: React.ReactNode;
+}) {
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    const t = setTimeout(() => close.current(), timeout);
+    return () => clearTimeout(t);
+  }, [timeout]);
+  return (
+    <div className="fixed top-4 right-4 z-50 w-80 max-w-[calc(100vw-2rem)] toast-in">
+      <Notice tone={tone} onClose={onClose} className="shadow-lg">{children}</Notice>
     </div>
   );
 }
@@ -62,10 +79,35 @@ export function ComplianceBadge({ emp }: { emp: { monthCompliant: Tri; weekStatu
 export function Card({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-3">
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className="text-xl font-semibold">{value}</div>
-      {sub && <div className="text-xs text-slate-500">{sub}</div>}
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs text-slate-500">{label}</div>
+        <div className="text-xl font-semibold text-right">{value}</div>
+      </div>
+      {sub && <div className="text-xs text-slate-500 text-right">{sub}</div>}
     </div>
+  );
+}
+
+/** Title block used at the top of every page so headings line up and look the same. */
+export function PageHeader({ title, badge, sub, icon, aside }: { title: string; badge?: string; sub?: React.ReactNode; icon?: React.ReactNode; aside?: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3">
+      {icon && <span className="rounded-full bg-brand-soft text-brand p-2">{icon}</span>}
+      <div className="min-w-0 flex-1">
+        <h1 className="text-xl font-semibold">{title}{badge && <span className="ml-2 align-middle text-xs bg-slate-200 rounded-full px-2 py-0.5">{badge}</span>}</h1>
+        {sub && <p className="text-sm text-slate-500">{sub}</p>}
+      </div>
+      {aside}
+    </div>
+  );
+}
+
+/** Tab strip shared by the Dashboard and Wednesday pages. */
+export function Tabs<K extends string>({ tabs, value, onChange }: { tabs: readonly (readonly [K, string])[]; value: K; onChange: (k: K) => void }) {
+  return (
+    <nav className="tabs">
+      {tabs.map(([k, label]) => <button key={k} onClick={() => onChange(k)} className={`tab ${value === k ? 'tab-active' : ''}`}>{label}</button>)}
+    </nav>
   );
 }
 
@@ -99,13 +141,26 @@ export function SortTh<K extends string>({ k, sort, children }: { k: K; sort: Re
   );
 }
 
-export function Pager({ page, pages, onPage }: { page: number; pages: number; onPage: (p: number) => void }) {
-  if (pages <= 1) return null;
+/** Previous / next controls. `always` keeps them on screen even when everything fits on one page. */
+export function Pager({ page, pages, onPage, always }: { page: number; pages: number; onPage: (p: number) => void; always?: boolean }) {
+  const total = Math.max(pages, 1);
+  const [draft, setDraft] = useState(String(page + 1));
+  useEffect(() => setDraft(String(page + 1)), [page]);
+  if (pages <= 1 && !always) return null;
+  // Jump only to a whole number inside 1..total; anything else snaps back to the current page.
+  const jump = () => {
+    const n = Number(draft);
+    if (Number.isInteger(n) && n >= 1 && n <= total) onPage(n - 1);
+    else setDraft(String(page + 1));
+  };
   return (
-    <div className="flex items-center gap-2 text-sm mt-3">
-      <button className="btn btn-secondary" disabled={page <= 0} onClick={() => onPage(page - 1)}>Prev</button>
-      <span>Page {page + 1} of {pages}</span>
-      <button className="btn btn-secondary" disabled={page >= pages - 1} onClick={() => onPage(page + 1)}>Next</button>
+    <div className="flex items-center justify-end gap-2 text-sm mt-3">
+      <button className="btn btn-secondary btn-sm" disabled={page <= 0} onClick={() => onPage(page - 1)}>Prev</button>
+      <span className="text-slate-600 flex items-center gap-1">Page
+        <input className="w-9 h-6 px-1 text-center text-sm rounded border border-slate-300 bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50" maxLength={3} inputMode="numeric" aria-label="Go to page" value={draft} disabled={total <= 1}
+          onChange={(e) => setDraft(e.target.value.replace(/\D/g, ''))} onBlur={jump} onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()} />
+        of {total}</span>
+      <button className="btn btn-secondary btn-sm" disabled={page >= pages - 1 || pages <= 1} onClick={() => onPage(page + 1)}>Next</button>
     </div>
   );
 }

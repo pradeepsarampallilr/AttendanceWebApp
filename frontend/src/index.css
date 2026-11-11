@@ -1,25 +1,65 @@
 @import "tailwindcss";
 
+/* LiveRamp palette (from liveramp.com): brand blue + green accents on warm grays. Slate is remapped so every page picks it up. */
+@theme {
+  --color-brand: #16774e;
+  --color-brand-dark: #105f41;
+  --color-brand-soft: #dafbe7;
+  --color-accent: #32db86;
+  --color-slate-50: #f5f4ef;
+  --color-slate-100: #edece7;
+  --color-slate-200: #e1e1df;
+  --color-slate-300: #cfcec9;
+  --color-slate-400: #a1a09c;
+  --color-slate-500: #5d5b57;
+  --color-slate-600: #42403e;
+  --color-slate-700: #343332;
+  --color-slate-800: #2a2928;
+  --color-slate-900: #222120;
+  /* liveramp.com uses square corners; pills (rounded-full) stay round. */
+  --radius-sm: 0; --radius-md: 0; --radius-lg: 0; --radius-xl: 0; --radius-2xl: 0;
+}
+body { background: var(--color-slate-50); color: var(--color-slate-900); }
+
 /* One typeface everywhere (form controls and SVG text included). */
 html, body, button, input, select, textarea, svg text {
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: "LiveRamp Sans", Arial, ui-sans-serif, system-ui, sans-serif;
 }
 
 /* Shared control styles: every button/field has the same height, border, radius and a readable minimum width. */
 @layer components {
   .btn {
     @apply inline-flex items-center justify-center gap-1.5 h-9 min-w-24 px-3 rounded-md border text-sm font-medium
-      whitespace-nowrap transition focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500
+      whitespace-nowrap transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand
       focus-visible:ring-offset-1 disabled:opacity-40 disabled:cursor-not-allowed;
   }
-  .btn-primary { @apply border-slate-900 bg-slate-900 text-white enabled:hover:bg-slate-700; }
-  .btn-secondary { @apply border-slate-300 bg-white text-slate-700 enabled:hover:bg-slate-50; }
+  .btn-primary { @apply border-accent bg-accent text-slate-900 enabled:hover:bg-[#2cc178] enabled:hover:border-[#2cc178]; }
+  .btn-secondary { @apply border-slate-200 bg-white text-slate-900 shadow-sm enabled:hover:bg-slate-50; }
   .btn-success { @apply border-emerald-200 bg-emerald-50 text-emerald-700 enabled:hover:bg-emerald-100; }
   .btn-danger { @apply border-rose-200 bg-rose-50 text-rose-700 enabled:hover:bg-rose-100; }
+  /* Same tab strip on every page that has tabs. */
+  .tabs { @apply flex gap-1 border-b border-slate-200; }
+  .tab { @apply px-4 py-2 min-w-32 text-center text-sm -mb-px border-b-2 border-transparent text-slate-500 transition hover:text-slate-900; }
+  .tab-active { @apply border-accent font-medium text-slate-900 hover:text-slate-900; }
+  /* Same filter bar on every page: controls share the row and the last one ends flush with the cards below. */
+  .filters { @apply flex flex-wrap items-center gap-2; }
+  .filters > .field { @apply flex-1 min-w-40; }
   .btn-icon { @apply min-w-9 w-9 px-0; }
   .btn-sm { @apply h-8 min-w-20 text-xs; }
   .field {
     @apply h-9 min-w-36 px-3 rounded-md border border-slate-300 bg-white text-sm text-slate-900
-      focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 disabled:opacity-50;
+      focus:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50;
+  }
+  /* Native select arrows sit flush against the right border; draw our own with proper inset. */
+  select.field {
+    appearance: none;
+    padding-right: 2.25rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%2364748b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 7.5l5 5 5-5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 1rem 1rem;
   }
 }
+
+@keyframes toast-in { from { opacity: 0; transform: translateX(1.5rem); } to { opacity: 1; transform: none; } }
+.toast-in { animation: toast-in 0.2s ease-out; }

@@ -2,7 +2,7 @@
  * Builds the Excel download of the attendance results.
  */
 import ExcelJS from "exceljs";
-import { MONTH_NAMES, fmtDate, fmtWeekday } from "../engine/core.js";
+import { MONTH_NAMES, addDays, fmtDate, fmtWeekday, settings } from "../engine/core.js";
 import type { ApiRow } from "./adjustments.js";
 
 const HEADERS = [
@@ -43,7 +43,7 @@ export async function buildWorkbook(
   ws.views = [{ state: "frozen", ySplit: 2 }];
   ws.columns.forEach((c) => { c.width = 18; });
 
-  const ww = wb.addWorksheet("Wednesday Office Attended");
+  const ww = wb.addWorksheet(`${fmtWeekday(addDays("2026-11-02", settings.anchorWeekday))} Office Attended`);
   const holidays = new Set(wed.holidays);
   ww.addRow(["Employee id", "Employee Name", ...wed.wednesdays.map((d) => fmtDate(d) + (holidays.has(d) ? " (Holiday)" : "")), "Days Attended"]);
   style(ww, 1);

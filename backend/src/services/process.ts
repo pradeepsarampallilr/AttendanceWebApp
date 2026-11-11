@@ -4,9 +4,8 @@
 import { And, LessThan, MoreThanOrEqual } from "typeorm";
 import { AppDataSource } from "../db.js";
 import { buildAttendanceDataset } from "../engine/dataset.js";
-import { carryoverFromEvents } from "../engine/movement.js";
-import { daysInMonth, mkDate, weekday, type DateStr } from "../engine/core.js";
-import { AttendanceVisit, AuditIssue, Leave, PublicHoliday, SwipeEvent, WednesdayAttendance } from "../models/index.js";
+import { addDays, daysInMonth, mkDate, settings, weekStart, weekday, type DateStr } from "../engine/core.js";
+import { AttendanceVisit, AuditIssue, Leave, PublicHoliday, SwipeEvent, WednesdayAttendance, WeeklyCompliance } from "../models/index.js";
 import {
   insertChunked, loadEvents, loadRoster, monthStart, monthUploadIds, nextMonthStart, refreshTransportOptIn, ts,
 } from "./store.js";
@@ -25,10 +24,10 @@ export async function processMonth(ym: string) {
   const { roster, unresolvedManagers } = await loadRoster(em);
   if (!roster.size) throw new NotFoundError("No roster uploaded yet");
 
-  // Previous month's final-day swipes (pairing only), from whatever is already stored.
-  const last = await em.getRepository(SwipeEvent).createQueryBuilder("s")
-    .select("max(s.at)", "last").where("s.at < :ms", { ms }).getRawOne<{ last: string | null }>();
-  const previousEvents = last?.last ? carryoverFromEvents(await loadEvents(em, { before: ms })) : new Map();
+  // Swipes before the month, back to the day before the Monday of its first week: that week's early days count
+  // toward its compliance, and the extra day lets a night shift pair across midnight.
+  const from = addDays(weekStart(ms), -1);
+  const previousEvents = await loadEvents(em, { from, before: ms });
 
   const nameQb = em.getRepository(SwipeEvent).createQueryBuilder("s")
     .select("s.employeeId", "employeeId").addSelect("s.employeeName", "employeeName")
@@ -38,16 +37,17 @@ export async function processMonth(ym: string) {
   const fallbackNames = new Map<string, string>(
     (await nameQb.getRawMany<{ employeeId: string; employeeName: string }>()).map((r) => [r.employeeId, r.employeeName]));
 
-  const holidays = new Set<DateStr>(
-    (await em.find(PublicHoliday, { where: { month: ms } })).map((h) => h.holidayDate));
+  // Off days from the first week's Monday through the month, so a week that began last month is judged correctly.
+  const range = And(MoreThanOrEqual(weekStart(ms)), LessThan(nextMonthStart(ms)));
+  const holidays = new Set<DateStr>((await em.find(PublicHoliday, { where: { holidayDate: range } })).map((h) => h.holidayDate));
 
   const leaves = new Map<string, Set<DateStr>>();
-  for (const l of await em.find(Leave, { where: { leaveDate: And(MoreThanOrEqual(ms), LessThan(nextMonthStart(ms))) } })) {
+  for (const l of await em.find(Leave, { where: { leaveDate: range } })) {
     if (!leaves.has(l.employeeId)) leaves.set(l.employeeId, new Set());
     leaves.get(l.employeeId)!.add(l.leaveDate);
   }
 
-  const { rows, issues, attendedDates } = buildAttendanceDataset({
+  const { rows, weekly, issues, attendedDates } = buildAttendanceDataset({
     currentEvents, previousEvents, roster, year, month, fallbackNames, holidays, leaves });
   if (unresolvedManagers.length) {
     issues.push({ employeeId: "-", issueType: "Manager email unresolved", at: new Date(),
@@ -58,13 +58,14 @@ export async function processMonth(ym: string) {
   const wednesdays: DateStr[] = [];
   for (let d = 1; d <= daysInMonth(year, month); d++) {
     const date = mkDate(year, month, d);
-    if (weekday(date) === 2) wednesdays.push(date);
+    if (weekday(date) === settings.anchorWeekday) wednesdays.push(date);
   }
 
   await AppDataSource.transaction(async (m) => {
     await m.delete(AttendanceVisit, { month: ms });
     await m.delete(AuditIssue, { month: ms });
     await m.delete(WednesdayAttendance, { month: ms });
+    await m.delete(WeeklyCompliance, { month: ms });
 
     const col = <T>(f: (r: (typeof rows)[number]) => T) => rows.map(f);
     await m.query(
@@ -81,6 +82,7 @@ export async function processMonth(ym: string) {
         col((r) => r.rowsInDayGroup), col((r) => r.shiftLabel), col((r) => r.eligibility), col((r) => r.compliant),
         col((r) => r.weekCompliant), col((r) => r.monthCompliant)]);
 
+    await insertChunked(m, WeeklyCompliance, weekly.map((w) => { const { name, ...rest } = w; return m.create(WeeklyCompliance, { month: ms, employeeName: name, ...rest }); }));
     await refreshTransportOptIn(m, ms);
 
     await m.query(

@@ -1,24 +1,28 @@
 /**
- * Users see who came to the office on Wednesdays, by employee or in a full table, with tiers and totals.
+ * Users see who came to the office on the anchor day (Wednesday by default), by employee or in a full table, with tiers and totals.
  * They can search, filter and mark days present or absent.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, wednesdayApi } from '../api';
+import { useCanEdit } from '../AuthGate';
+import { useConfirm } from '../components/ConfirmModal';
+import { useAnchorDay } from '../lib/anchorDay';
+import { calendarWeek } from '../lib/dates';
 import { useAsync } from '../useAsync';
-import { Card, Empty, Loading, Notice, Pager, SortTh, td, th, useSort } from '../components/dashboard/shared';
+import { Card, Empty, Loading, Toast, PageHeader, Pager, SortTh, Tabs, td, th, useSort } from '../components/dashboard/shared';
 import {
   HOURS_PER_DAY, filterWed, stats, summarize, tierOf, tierOptions, workingWednesdays,
   type TierName, type WedEmployee,
 } from '../lib/wednesday';
 
 const TABS = [
-  ['employee', 'Per Employee Details'],
   ['directory', 'All Employees Details'],
-  ['ledger', 'Complete Wednesday Details'],
+  ['employee', 'Per Employee Details'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
-const PAGE_SIZES = [10, 15, 25, 50];
+const PAGE = 10;
+const LIST_PAGE = 10;
 const TIER_CLS: Record<TierName, string> = {
   Perfect: 'bg-emerald-100 text-emerald-800', High: 'bg-sky-100 text-sky-800',
   Moderate: 'bg-amber-100 text-amber-800', Low: 'bg-orange-100 text-orange-800', Zero: 'bg-rose-100 text-rose-800',
@@ -41,136 +45,102 @@ const Pill = ({ on, onClick }: { on: boolean; onClick?: () => void }) => {
     ? <button className={`${cls} cursor-pointer transition hover:ring-2 ring-slate-300 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500`} title={on ? 'Click to mark absent' : 'Click to mark attended'} onClick={onClick}>{dot}{on ? 'Present' : 'Absent'}</button>
     : <span className={cls}>{dot}{on ? 'Present' : 'Absent'}</span>;
 };
-const actionBtn = 'inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500';
-const ToggleBtn = ({ on, onClick, full, label }: { on: boolean; onClick: () => void; full?: boolean; label?: string }) => (
-  <button
-    onClick={onClick}
-    className={`${actionBtn} ${full ? 'w-full' : 'min-w-[8rem]'} ${on ? 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100' : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
-  >
-    {label ?? (on ? 'Mark Absent' : 'Mark Attended')}
-  </button>
+const ToggleBtn = ({ on, onClick }: { on: boolean; onClick: () => void }) => (
+  <button onClick={onClick} className={`btn btn-sm ${on ? 'btn-danger' : 'btn-success'}`}>{on ? 'Mark Absent' : 'Mark Present'}</button>
 );
 const cth = `${th} !text-center`;
 const ctd = `${td} !align-middle text-center`;
 const ctdv = `${td} !align-middle`;
-const Dots = ({ flags }: { flags: boolean[] }) => (
-  <span className="inline-flex gap-1">{flags.map((f, i) => <span key={i} className={`w-2.5 h-2.5 rounded-full ${f ? 'bg-emerald-500' : 'bg-slate-300'}`} />)}</span>
-);
-const Bar = ({ value }: { value: number }) => (
-  <div className="flex items-center gap-2"><div className="w-24 h-2 bg-slate-100 rounded"><div className="h-2 bg-emerald-500 rounded" style={{ width: pct(value) }} /></div><span className="text-xs">{pct(value)}</span></div>
-);
-
-function PageSize({ size, onChange }: { size: number; onChange: (n: number) => void }) {
-  return (
-    <label className="text-sm text-slate-600">Rows <select className="field py-0.5 ml-1" value={size} onChange={(e) => onChange(Number(e.target.value))}>
-      {PAGE_SIZES.map((n) => <option key={n}>{n}</option>)}</select></label>
-  );
-}
-
 type K = 'id' | 'name' | 'days';
 const keyOf = (e: WedEmployee, k: K) => (k === 'id' ? e.employeeId : k === 'name' ? e.name : e.days);
 
-function DirectoryTable({ emps, dates, allDates, holidays, ledger, onDetail, onToggle }: { emps: WedEmployee[]; dates: string[]; allDates: string[]; holidays: Set<string>; ledger?: boolean; onDetail: (id: string) => void; onToggle: Toggle }) {
+function DirectoryTable({ emps, dates, allDates, holidays, onDetail, onToggle }: { emps: WedEmployee[]; dates: string[]; allDates: string[]; holidays: Set<string>; onDetail: (id: string) => void; onToggle: Toggle }) {
+  const canEdit = useCanEdit();
   const sort = useSort<K>('name');
   const [page, setPage] = useState(0);
-  const [size, setSize] = useState(15);
-  useEffect(() => setPage(0), [emps, size]);
+  useEffect(() => setPage(0), [emps]);
   if (!emps.length) return <Empty />;
   const sorted = sort.sort(emps, keyOf);
-  const start = page * size;
+  const start = page * PAGE;
   return (
     <div>
-      <div className="flex justify-end mb-2"><PageSize size={size} onChange={setSize} /></div>
       <div className="bg-white border border-slate-200 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead><tr>
-            {ledger && <th className={cth}>#</th>}
             <SortTh k="id" sort={sort}>Employee ID</SortTh><SortTh k="name" sort={sort}>Employee Name</SortTh>
             {allDates.map((d) => <th key={d} className={`${cth} ${holidays.has(d) ? HOLIDAY_CELL : ''}`}>{short(d)}{holidays.has(d) && <span className="block text-xs font-normal">Holiday</span>}</th>)}
             <SortTh k="days" sort={sort}>Days Attended</SortTh>
-            {!ledger && <><th className={cth}>Compliance</th><th className={cth}>Action</th></>}
+            <th className={cth}>Action</th>
           </tr></thead>
           <tbody>
-            {sorted.slice(start, start + size).map((e, i) => (
+            {sorted.slice(start, start + PAGE).map((e) => (
               <tr key={e.employeeId}>
-                {ledger && <td className={ctd}>{start + i + 1}</td>}
                 <td className={`${ctdv}`}>{e.employeeId}</td><td className={ctdv}>{e.name}</td>
                 {allDates.map((d) => {
                   if (holidays.has(d)) return <td key={d} className={`${ctd} ${HOLIDAY_CELL}`}><HolidayPill /></td>;
                   const j = dates.indexOf(d);
-                  return <td key={d} className={ctd}><Pill on={e.flags[j]} onClick={() => onToggle(e.employeeId, d, !e.flags[j])} /></td>;
+                  return <td key={d} className={ctd}><Pill on={e.flags[j]} onClick={canEdit ? () => onToggle(e.employeeId, d, !e.flags[j]) : undefined} /></td>;
                 })}
                 <td className={ctd}><TierBadge days={e.days} total={dates.length} /></td>
-                {!ledger && <><td className={ctd}><div className="flex justify-center"><Bar value={e.rate} /></div></td>
-                  <td className={ctd}><button className={`${actionBtn} border-slate-300 bg-white text-slate-700 hover:bg-slate-50`} onClick={() => onDetail(e.employeeId)}>View Detail</button></td></>}
+                <td className={ctd}><button className="btn btn-secondary btn-sm" onClick={() => onDetail(e.employeeId)}>View Detail</button></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <Pager page={page} pages={Math.ceil(sorted.length / size)} onPage={setPage} />
+      <Pager page={page} pages={Math.ceil(sorted.length / PAGE)} onPage={setPage} />
     </div>
   );
 }
 
 function EmployeeTab({ emps, dates, allDates, holidays, selectedId, onSelect, onToggle }: { emps: WedEmployee[]; dates: string[]; allDates: string[]; holidays: Set<string>; selectedId: string | null; onSelect: (id: string) => void; onToggle: Toggle }) {
+  const canEdit = useCanEdit();
+  const day = useAnchorDay();
+  const [page, setPage] = useState(0);
+  const pages = Math.ceil(emps.length / LIST_PAGE);
+  useEffect(() => setPage((p) => Math.min(p, Math.max(pages - 1, 0))), [pages]);
   if (!emps.length) return <Empty />;
   const sel = emps.find((e) => e.employeeId === selectedId) ?? emps[0];
   const n = dates.length;
-  const initials = sel.name.split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
   return (
-    <div className="grid grid-cols-[18rem_1fr] gap-4">
-      <ul className="bg-white border border-slate-200 rounded-lg max-h-[32rem] overflow-y-auto divide-y divide-slate-100">
-        {emps.map((e) => (
-          <li key={e.employeeId}>
-            <button onClick={() => onSelect(e.employeeId)} className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 ${e.employeeId === sel.employeeId ? 'bg-slate-100' : 'hover:bg-slate-50'}`}>
-              <span className="min-w-0"><span className="block text-sm truncate">{e.name}</span><span className="block text-xs text-slate-500">{e.employeeId}</span><Dots flags={e.flags} /></span>
+    <div className="grid grid-cols-[320px_1fr] gap-4">
+      <div className="min-w-0 flex flex-col">
+      <ul className="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100 flex flex-col flex-1">
+        {emps.slice(page * LIST_PAGE, (page + 1) * LIST_PAGE).map((e) => (
+          <li key={e.employeeId} className="flex-1">
+            <button onClick={() => onSelect(e.employeeId)} className={`w-full h-full text-left px-3 py-2 flex items-center justify-between gap-2 ${e.employeeId === sel.employeeId ? 'bg-brand-soft' : 'hover:bg-slate-50'}`}>
+              <span className="min-w-0 text-sm truncate">{e.name} <span className="text-slate-500">#{e.employeeId}</span></span>
               <TierBadge days={e.days} total={n} />
             </button>
           </li>
         ))}
       </ul>
-      <div className="space-y-4">
-        <div className="bg-white border border-slate-200 rounded-lg p-4 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-slate-900 text-white flex items-center justify-center font-semibold">{initials}</div>
-          <div className="flex-1"><div className="font-semibold">{sel.name}</div><div className="text-xs text-slate-500">{sel.employeeId}</div></div>
-          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${TIER_CLS[tierOf(sel.days, n)]}`}>{sel.days}/{n} {tierOf(sel.days, n)} ({pct(sel.rate)})</span>
+      <Pager page={page} pages={pages} onPage={setPage} />
+      </div>
+      <div className="space-y-4 min-w-0">
+        <div className="bg-white border border-slate-200 rounded-lg p-4">
+          <div className="font-semibold text-lg">{sel.name} <span className="text-xs bg-slate-100 rounded px-1.5 py-0.5">#{sel.employeeId}</span> <TierBadge days={sel.days} total={n} /></div>
+          <div className="text-sm text-slate-600">{[sel.email, sel.shift ?? 'No shift', sel.department || '—'].join(' · ')}</div>
         </div>
-        <div className="grid grid-cols-4 gap-3 text-center">
+        <div className="grid grid-cols-4 gap-3">
           <Card label="Days Attended" value={`${sel.days} / ${n} Days`} />
           <Card label="Compliance Rate" value={pct(sel.rate)} />
           <Card label="Est. In-Person Hours" value={`~${(sel.days * HOURS_PER_DAY).toFixed(1)} hrs`} />
           <Card label="Policy Status" value={sel.days === n ? '✓ Compliant' : 'Needs In-Office'} />
         </div>
-        <div className="grid grid-cols-4 gap-3">
-          {allDates.map((d, w) => {
-            const i = dates.indexOf(d);
-            return holidays.has(d) ? (
-              <div key={d} className={`border border-slate-200 rounded-lg p-3 flex flex-col items-center text-center ${HOLIDAY_CELL}`}>
-                <div className="text-sm font-medium">{short(d)}</div><div className="text-xs mb-2">Week {w + 1}</div><HolidayPill />
-                <div className="mt-3 text-xs">Public holiday</div>
-              </div>
-            ) : (
-              <div key={d} className="bg-white border border-slate-200 rounded-lg p-3 flex flex-col items-center text-center">
-                <div className="text-sm font-medium">{short(d)}</div><div className="text-xs text-slate-500 mb-2">Week {w + 1}</div><Pill on={sel.flags[i]} />
-                <div className="mt-3 w-full"><ToggleBtn full on={sel.flags[i]} onClick={() => onToggle(sel.employeeId, d, !sel.flags[i])} /></div>
-              </div>
-            );
-          })}
-        </div>
         <div className="bg-white border border-slate-200 rounded-lg overflow-x-auto">
           <table className="w-full text-sm">
-            <thead><tr><th className={cth}>Date</th><th className={cth}>Calendar Day</th><th className={cth}>In-Office Status</th><th className={cth}>Est. Hours</th><th className={cth}>Toggle State</th></tr></thead>
-            <tbody>{allDates.map((d, w) => {
+            <thead><tr><th className={cth}>Date</th><th className={cth}>Calendar Day</th><th className={cth}>In-Office Status</th><th className={cth}>Est. Hours</th>{canEdit && <th className={cth}>Change Status</th>}</tr></thead>
+            <tbody>{allDates.map((d) => {
               const i = dates.indexOf(d);
               if (holidays.has(d)) return (
-                <tr key={d} className={HOLIDAY_CELL}><td className={ctd}>{d}</td><td className={ctd}>Wednesday (Week {w + 1})</td><td className={ctd}><HolidayPill /></td>
-                  <td className={ctd}>—</td><td className={ctd}>—</td></tr>
+                <tr key={d} className={HOLIDAY_CELL}><td className={ctd}>{d}</td><td className={ctd}>{day} (Week {calendarWeek(d)})</td><td className={ctd}><HolidayPill /></td>
+                  <td className={ctd}>—</td>{canEdit && <td className={ctd}>—</td>}</tr>
               );
               return (
-                <tr key={d}><td className={ctd}>{d}</td><td className={ctd}>Wednesday (Week {w + 1})</td><td className={ctd}><Pill on={sel.flags[i]} /></td>
+                <tr key={d}><td className={ctd}>{d}</td><td className={ctd}>{day} (Week {calendarWeek(d)})</td><td className={ctd}><Pill on={sel.flags[i]} /></td>
                   <td className={ctd}>{(sel.flags[i] ? HOURS_PER_DAY : 0).toFixed(1)} hrs</td>
-                  <td className={ctd}><ToggleBtn on={sel.flags[i]} label="Toggle" onClick={() => onToggle(sel.employeeId, d, !sel.flags[i])} /></td></tr>
+                  {canEdit && <td className={ctd}><ToggleBtn on={sel.flags[i]} onClick={() => onToggle(sel.employeeId, d, !sel.flags[i])} /></td>}</tr>
               );
             })}</tbody>
           </table>
@@ -181,10 +151,12 @@ function EmployeeTab({ emps, dates, allDates, holidays, selectedId, onSelect, on
 }
 
 export default function WednesdayPage({ month }: { month: string }) {
+  const day = useAnchorDay();
   const [params, setParams] = useSearchParams();
   const months = useAsync(api.months, []);
   const processed = months.data?.find((m) => m.month.slice(0, 7) === month)?.processed;
   const [err, setErr] = useState<string | null>(null);
+  const [ask, modal] = useConfirm();
   const wed = useAsync(() => (month && processed ? wednesdayApi.get(month) : Promise.resolve(null)), [month, processed]);
   const allDates = wed.data?.wednesdays ?? [];
   const holidays = useMemo(() => new Set(wed.data?.holidays ?? []), [wed.data]);
@@ -195,7 +167,7 @@ export default function WednesdayPage({ month }: { month: string }) {
   const tierParam = params.get('tier');
   const tier = tierParam !== null && /^\d+$/.test(tierParam) && Number(tierParam) <= dates.length ? Number(tierParam) : null;
   const tabParam = params.get('tab');
-  const tab: Tab = TABS.some(([k]) => k === tabParam) ? (tabParam as Tab) : 'employee';
+  const tab: Tab = TABS.some(([k]) => k === tabParam) ? (tabParam as Tab) : 'directory';
   const set = (patch: Record<string, string>) =>
     setParams((p) => {
       const nx = new URLSearchParams(p);
@@ -203,8 +175,12 @@ export default function WednesdayPage({ month }: { month: string }) {
       return nx;
     }, { replace: 'q' in patch });
   const toggle: Toggle = (id, date, attended) => {
-    setErr(null);
-    wednesdayApi.set(month, id, date, attended).then(wed.refresh, (e: Error) => setErr(e.message));
+    const name = all.find((e) => e.employeeId === id)?.name ?? id;
+    ask({ title: `Mark ${attended ? 'present' : 'absent'}?`, confirmLabel: attended ? 'Mark present' : 'Mark absent', tone: attended ? 'primary' : 'danger',
+      message: `Mark ${name} as ${attended ? 'present' : 'absent'} on ${date}?` }, () => {
+      setErr(null);
+      wednesdayApi.set(month, id, date, attended).then(wed.refresh, (e: Error) => setErr(e.message));
+    });
   };
   const emps = useMemo(() => filterWed(all, q, tier), [all, q, tier]);
 
@@ -212,38 +188,33 @@ export default function WednesdayPage({ month }: { month: string }) {
   if (months.loading || wed.loading) return <Loading />;
   if (months.error || wed.error) return <p className="text-sm text-red-600">Error: {months.error ?? wed.error}</p>;
   if (!processed) return <Empty text={`${month} has not been processed. Process this month first (Upload page).`} />;
-  if (!allDates.length || !all.length) return <Empty text={`No Wednesday rows for ${month}.`} />;
+  if (!allDates.length || !all.length) return <Empty text={`No ${day} rows for ${month}.`} />;
 
   const n = dates.length;
   const s = stats(emps, n);
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold">Wednesday In-Office Attendance <span className="ml-2 text-xs bg-slate-200 rounded-full px-2 py-0.5">{month}</span></h1>
-        <p className="text-sm text-slate-500">Tracking mandatory Wednesday in-office policy across {n} operational cycles{holidays.size > 0 && ` (${holidays.size} public ${holidays.size === 1 ? 'holiday' : 'holidays'} excluded)`}</p>
-      </div>
-      <div className="flex gap-2">
-        <input className="field flex-1 max-w-md" placeholder="Search by name or ID" value={q} onChange={(e) => set({ q: e.target.value })} />
-        <select className="field" value={tier ?? ''} onChange={(e) => set({ tier: e.target.value })}>
-          <option value="">Compliance </option>
+      <PageHeader title="Anchor Day Attendance" badge={month}
+        aside={<span className="rounded-full border border-amber-300 bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">Anchor day: {day}</span>}
+        sub={`Tracking mandatory ${day} in-office policy across ${n} operational cycles${holidays.size > 0 ? ` (${holidays.size} public ${holidays.size === 1 ? 'holiday' : 'holidays'} excluded)` : ''}`} />
+      <div className="filters">
+        <input className="field !flex-[3]" placeholder="Search by name or ID" value={q} onChange={(e) => set({ q: e.target.value })} />
+        <select className="field" aria-label="Compliance" value={tier ?? ''} onChange={(e) => set({ tier: e.target.value })}>
+          <option value="">All Compliance</option>
           {tierOptions(n).map((o) => <option key={o.days} value={o.days}>{o.label}</option>)}
         </select>
       </div>
       <div className="grid grid-cols-4 gap-3">
         <Card label="Total Staff Tracked" value={s.staff} />
-        <Card label={`Perfect Attendance (${n}/${n})`} value={s.perfect} sub={s.staff ? pct(s.perfect / s.staff) : '0%'} />
-        <Card label="Average In-Office Days" value={`${s.avgDays.toFixed(1)} / ${n.toFixed(1)}`} sub={`${n ? pct(s.avgDays / n) : '0%'} of goal`} />
-        <Card label="Overall Wednesday Footfall" value={s.footfall} sub={`${s.avgTurnout.toFixed(1)} avg per Wednesday`} />
+        <Card label={`Full Attendance (${n}/${n})`} value={s.perfect} sub={s.staff ? pct(s.perfect / s.staff) : '0%'} />
+        <Card label="Average In-Office Days" value={`${s.avgDays.toFixed(1)} / ${n.toFixed(1)}`} sub={`${n ? pct(s.avgDays / n) : '0%'} of working ${day}s`} />
+        <Card label={`Overall ${day} Footfall`} value={s.footfall} sub={`${s.avgTurnout.toFixed(1)} avg per ${day}`} />
       </div>
-      {err && <Notice tone="error" onClose={() => setErr(null)}>Update failed: {err}</Notice>}
-      <nav className="flex gap-1 border-b border-slate-200">
-        {TABS.map(([k, label]) => (
-          <button key={k} onClick={() => set({ tab: k })} className={`px-4 py-2 min-w-32 text-center text-sm -mb-px border-b-2 ${tab === k ? 'border-slate-900 font-medium' : 'border-transparent text-slate-500'}`}>{label}</button>
-        ))}
-      </nav>
+      {err && <Toast tone="error" onClose={() => setErr(null)}>Update failed: {err}</Toast>}
+      <Tabs tabs={TABS} value={tab} onChange={(k) => set({ tab: k })} />
       {tab === 'employee' && <EmployeeTab emps={emps} dates={dates} allDates={allDates} holidays={holidays} selectedId={params.get('emp')} onSelect={(id) => set({ emp: id })} onToggle={toggle} />}
+      {modal}
       {tab === 'directory' && <DirectoryTable emps={emps} dates={dates} allDates={allDates} holidays={holidays} onDetail={(id) => set({ tab: 'employee', emp: id })} onToggle={toggle} />}
-      {tab === 'ledger' && <DirectoryTable emps={emps} dates={dates} allDates={allDates} holidays={holidays} ledger onDetail={() => {}} onToggle={toggle} />}
     </div>
   );
 }

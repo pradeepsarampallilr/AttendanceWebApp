@@ -4,7 +4,7 @@ import { Check, Column, Entity, Index, PrimaryGeneratedColumn } from "typeorm";
 type Tri = "Yes" | "No" | "NA";
 
 @Entity("attendance_visits")
-@Check("attendance_visits_eligibility_check", "eligibility IN ('Yes','No')")
+@Check("attendance_visits_eligibility_check", "eligibility IN ('Yes','No','NA')")
 @Check("attendance_visits_compliant_check", "compliant IN ('Yes','No','NA')")
 @Check("attendance_visits_week_compliant_check", "week_compliant IN ('Yes','No','NA')")
 @Check("attendance_visits_month_compliant_check", "month_compliant IN ('Yes','No','NA')")
@@ -66,7 +66,7 @@ export class AttendanceVisit {
   shiftLabel!: string;
 
   @Column({ type: "text" })
-  eligibility!: "Yes" | "No";
+  eligibility!: "Yes" | "No" | "NA";
 
   @Column({ type: "text" })
   compliant!: Tri;

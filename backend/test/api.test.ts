@@ -70,7 +70,7 @@ describe("upload + process matches golden", () => {
     expect((await query("SELECT count(*)::int AS n FROM swipe_events")).rows[0].n).toBe(before);
     const months = await get("/months");
     expect(months.map((m: any) => m.month)).toEqual(["2026-08-01", "2026-07-01"]);
-    expect((await get("/uploads")).length).toBeGreaterThanOrEqual(3);
+    expect((await get("/uploads")).items.length).toBeGreaterThanOrEqual(3);
   }, 60_000);
 
   it.each([["2026-07", "july"], ["2026-08", "august"]])("processes %s", async (ym, name) => {
@@ -78,7 +78,7 @@ describe("upload + process matches golden", () => {
     expect((await post(`/months/${ym}/process`)).status).toBe(200);
     // Seed manual data and make sure a reprocess leaves it alone.
     await query("INSERT INTO manual_adjustments (month, employee_id, work_date, action, hours) VALUES ($1, $2, $3, 'add', 1) ON CONFLICT DO NOTHING", [`${ym}-01`, `m${ym}`, `${ym}-02`]);
-    await query("INSERT INTO wednesday_overrides (month, employee_id, wednesday, attended) VALUES ($1, $2, $3, true) ON CONFLICT DO NOTHING", [`${ym}-01`, `m${ym}`, `${ym}-02`]);
+    await query("INSERT INTO wednesday_adjustments (month, employee_id, wednesday, attended) VALUES ($1, $2, $3, true) ON CONFLICT DO NOTHING", [`${ym}-01`, `m${ym}`, `${ym}-02`]);
     expect((await post(`/months/${ym}/process`)).status).toBe(200);
 
     const rows = await get(`/months/${ym}/attendance`);
@@ -109,7 +109,7 @@ describe("upload + process matches golden", () => {
       expect(e.attended[w]).toBe(yes.get(e.employeeId)?.has(w) ?? false);
     }
 
-    const manual = await query("SELECT (SELECT count(*) FROM manual_adjustments WHERE employee_id = $1)::int AS a, (SELECT count(*) FROM wednesday_overrides WHERE employee_id = $1)::int AS w", [`m${ym}`]);
+    const manual = await query("SELECT (SELECT count(*) FROM manual_adjustments WHERE employee_id = $1)::int AS a, (SELECT count(*) FROM wednesday_adjustments WHERE employee_id = $1)::int AS w", [`m${ym}`]);
     expect(manual.rows[0]).toEqual({ a: 1, w: 1 });
   }, 120_000);
 });
@@ -215,9 +215,9 @@ describe("holidays", () => {
   it("stores, replaces and returns a month's holidays", async () => {
     expect(await get("/months/2026-08/holidays")).toEqual([]);
     expect((await put("2026-08", { dates: ["2026-08-15", "2026-08-12", "2026-08-12"] })).status).toBe(200);
-    expect(await get("/months/2026-08/holidays")).toEqual(["2026-08-12", "2026-08-15"]);
+    expect(await get("/months/2026-08/holidays")).toEqual([{ date: "2026-08-12", description: "" }, { date: "2026-08-15", description: "" }]);
     await put("2026-08", { dates: ["2026-08-05"] });
-    expect(await get("/months/2026-08/holidays")).toEqual(["2026-08-05"]);
+    expect(await get("/months/2026-08/holidays")).toEqual([{ date: "2026-08-05", description: "" }]);
     expect(await get("/months/2026-09/holidays")).toEqual([]);
   });
 
@@ -243,7 +243,7 @@ describe("access list (app_users)", () => {
     expect((await add(managers[0])).status).toBe(400); // already a manager
 
     await send("roster", "roster.xlsx"); // re-upload keeps HR
-    const roles = (await get("/admin/users")) as { email: string; role: string }[];
+    const roles = ((await get("/admin/users")).items) as { email: string; role: string }[];
     expect(roles.find((u) => u.email === "hr.one@liveramp.com")?.role).toBe("hr");
 
     expect((await fetch(`${base}/api/admin/users/hr.one@liveramp.com`, { method: "DELETE" })).status).toBe(204);

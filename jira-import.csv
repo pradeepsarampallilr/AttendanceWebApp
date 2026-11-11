@@ -1,0 +1,440 @@
+﻿Issue Id,Issue Type,Summary,Description,Parent,Labels,Labels
+1,Epic,ATT-E1 Attendance Reconciliation Script (version 1),"HR received a monthly door-access movement report from the access-control system: one row per employee per day, with alternating *In* and *Out*
+swipe columns. Turning it into office hours by hand was slow and error-prone. This epic delivers a command-line Python script (pandas + openpyxl)
+that reads the report, pairs each check-in with a valid checkout, adds shift and email details from a roster, assigns night-shift visits to the
+correct work date, and writes an Excel workbook with an Attendance sheet and an Audit Log sheet.
+Scope: movement report (CSV or XLSX), optional previous-month report, optional roster, Excel output, console use only.
+Out of scope: compliance policy, users, database and web interface.
+
+Benefit:
+- Replaces manual matching with a repeatable process that gives the same output for the same input.
+- Nothing is silently dropped: every skipped, blank or unresolved item is explained in the Audit Log.
+- Defines the business rules that the web engine (ATT-E2) later reuses.
+- Prefers a blank to a guess, which makes the report safer for payroll, audit and operations use.
+
+Acceptance criteria:
+1. A monthly report produces one workbook containing an Attendance sheet and an Audit Log sheet.
+2. Every check-in is either paired with a checkout, or kept with a blank checkout and logged.
+3. Every checkout that cannot be used is logged as an orphan and excluded from Attendance.
+4. Night-shift visits are reported on the day the shift started.
+5. Visits that started in the previous month are not counted in the current month's totals.
+6. The README lets a new developer find where each rule lives and which tests to run.",,attendance,ATT-E1
+101,Story,ATT-1.1 Read the movement report,"As an HR analyst, I want to give the script the raw movement report as CSV or Excel, so that I don't have to clean the export first.
+The script accepts `.csv` and `.xlsx`. The real header row is the row where a column equals `empcode` (case-insensitive), searched in the first 15 rows
+(`HEADER_PROBE`, `MAX_HEADER_SCAN_ROWS`); anything above it is discarded. If no such row exists, the run stops with a clear error naming the missing
+header instead of treating a title row as data.
+Done when: a report with three title rows above the table loads from the `EmpCode` row; a file without `EmpCode` stops with a readable error.
+
+Arch Review: No",1,attendance,ATT-E1
+102,Story,ATT-1.2 Clean and group swipes,"As an HR analyst, I want each employee's swipes normalised and grouped, so that one person is never split into two.
+Employee IDs are normalised (`""158920""`, `158920.0` and `"" 158920 ""` all become `158920`). Each row's date and time are combined into one timestamp;
+unreadable values are skipped and logged. Every employee gets a sorted list of check-ins and a sorted list of checkouts, with duplicate timestamps removed.
+Done when: the same ID in two formats gives one employee; two identical swipe times give one event.
+
+Arch Review: No",1,attendance,ATT-E1
+103,Story,ATT-1.3 Pair check-ins with checkouts,"As an HR analyst, I want every check-in matched to the right checkout, so that hours in the office are correct.
+A check-in takes the earliest unused checkout that is later than it, before the employee's next check-in, on the same or the next calendar day, and within
+`MAX_SHIFT_HOURS` (18). A checkout is used once. The rules are strict on purpose: no match is better than a wrong match.
+Done when: 16:10 to 18:11 the same day gives one visit of 2.02 hours; a checkout 19 hours later is not paired; two check-ins before one checkout leave
+the checkout for the second.
+
+Arch Review: Yes. The pairing rules decide every result. Changing `MAX_SHIFT_HOURS` or `_find_checkout()` can create false matches across days.",1,attendance,ATT-E1-arch-review
+104,Story,ATT-1.4 Handle missing and orphan swipes,"As an HR analyst, I want unmatched swipes kept visible, so that I can follow up instead of losing data.
+A check-in with no valid checkout stays in Attendance with a blank checkout and blank hours, and an audit entry *No matching checkout*. A checkout that no
+check-in can use is excluded from Attendance and logged as *Orphan checkout*. No hours are ever invented.
+Done when: a lone check-in appears with blank hours plus an audit entry; a leading checkout appears only in the Audit Log.
+
+Arch Review: Yes. Audit completeness and the ""leave blank, never guess"" policy.",1,attendance,ATT-E1-arch-review
+105,Story,ATT-1.5 Enrich with the shift roster,"As an HR analyst, I want name, email and shift added to each visit, so that the report can be filtered and shared.
+An optional roster (Excel) is read into stable `ShiftRecord` entries keyed by employee ID. Each matching visit gets email and shift timing. An employee who
+is not in the roster is still reported, with blank roster fields and an audit entry.
+Done when: matching visits show email and shift; an unknown ID produces an audit entry naming it.
+
+Arch Review: No",1,attendance,ATT-E1
+106,Story,ATT-1.6 Overnight work dates,"As an HR analyst, I want night-shift visits reported on the day the shift started, so that one shift is not split over two dates.
+For an overnight roster shift such as `4:00 PM - 1:30 AM`, a check-in after midnight and before the shift end belongs to the previous work date. Day
+shifts and later check-ins keep their own date. Only the reporting date changes; the stored check-in timestamp does not.
+Done when: for `4:00 PM - 1:30 AM`, a check-in at `2026-08-04 00:52` is reported on `2026-08-03` and one at `2026-08-04 15:42` on `2026-08-04`.
+
+Arch Review: Yes. The work date drives daily totals and merging; the shift end is the cut-off and must be parsed reliably.",1,attendance,ATT-E1-arch-review
+107,Story,ATT-1.7 Previous-month carry-over,"As an HR analyst, I want the last day of the previous month considered, so that a check-in on the last evening can pair with the checkout
+on the first morning.
+With an optional previous-month report, only its final transaction date is loaded and its events are placed before the current events. They are used for
+pairing only; visits whose check-in is in the previous month are excluded from the current month's output and totals.
+Done when: a 31 July 22:00 check-in pairs with a 1 August 06:00 checkout, and that visit is not counted in August.
+
+Arch Review: Yes. Month ownership of hours and the risk of double counting.",1,attendance,ATT-E1-arch-review
+108,Story,ATT-1.8 Month-end fallback checkout,"As an HR analyst, I want an estimated checkout for an overnight shift on the last day, so that the final night shift isn't left blank.
+The fallback applies only when the check-in is on the latest transaction date, the checkout is missing, the roster shift parses, and the shift crosses
+midnight. The next day's roster shift end is used (31 August, `4:30 PM - 1:30 AM` gives 1 September 01:30). Day shifts and earlier dates are never
+estimated. The value is an estimate, not a real swipe.
+Done when: the example above gives 1 Sep 01:30; a day-shift employee keeps a blank checkout.
+
+Arch Review: Yes. Policy on estimated data. The web engine chose a different rule (see the comparison at the end).",1,attendance,ATT-E1-arch-review
+109,Story,ATT-1.9 Hours and daily totals,"As an HR analyst, I want hours per visit and a total per day, so that I can see time spent in the office.
+Visit hours are checkout minus check-in, rounded to 2 decimals. Visits are grouped by employee and work date. The daily total is written on the group's
+first row, later rows stay blank, and the Date and Daily Total cells are merged vertically in Excel. Every visit row is kept.
+Done when: visits of 2.02 and 3.50 hours on one date give a daily total of 5.52 on the first row.
+
+Arch Review: No",1,attendance,ATT-E1
+110,Story,ATT-1.10 Excel report and audit log,"As an HR analyst, I want one workbook with attendance and issues, so that I can review and share the result.
+The Attendance sheet has: name, employee ID, email, shift, year, month, week, checked-in date, checked-out date, hours, date, daily total. The Audit Log
+sheet has: employee ID, name, issue, details, timestamp. Headers and date columns are styled (`openpyxl`).
+Done when: the file has both sheets and the column order matches `OUTPUT_COLUMNS` and `AUDIT_COLUMNS`.
+
+Arch Review: No",1,attendance,ATT-E1
+111,Story,ATT-1.11 Interactive run,"As an HR analyst, I want to run the script and answer prompts, so that I don't edit code for each month.
+`python3 attendance_engine.py` asks for the current report (required), the previous report (optional), the roster (optional) and the output name, with a
+default name built from the data.
+Done when: running with only the required file still produces a workbook, with no roster fields.
+
+Arch Review: No",1,attendance,ATT-E1
+112,Story,ATT-1.12 Developer documentation,"As a developer, I want a README with the mental model and change points, so that I can change a rule safely.
+It covers the runtime order, the five key methods, the rules that decide the result, safe customisation points, risky changes and a test checklist
+(same-day, overnight, missing checkout, orphan checkout, month boundary, final-date fallback, employee not in roster).
+Done when: a new developer can locate where to change a rule and which cases to test.
+
+Arch Review: No",1,attendance,ATT-E1
+2,Epic,ATT-E2 Attendance Engine (web version),"The version-1 logic is rewritten in TypeScript as a pure module of the Express backend (`backend/src/engine`, no database access) and extended with the
+company attendance policy: a day counts at 7.0 hours, a week needs 3 office days including every working Wednesday, and a month needs an average of
+7.0 hours per working day. A processing service loads the stored data, runs the engine, and saves attendance rows, audit issues and Wednesday records in
+one transaction. Results are checked against the Python script for July and August (golden tests).
+Scope: pairing, work-day assignment, hours, eligibility, compliance, audit issues, month processing.
+Out of scope: screens (ATT-E3 to ATT-E5), manual edits and authentication.
+
+Benefit:
+- The same policy is applied the same way to every employee, with no manual calculation.
+- Same numbers as the script, proven by golden tests, so the move from script to web did not change results.
+- A pure module is easy to test and safe to change.
+- Every data problem is recorded, so results can be explained.
+
+Acceptance criteria:
+1. July and August outputs match the Python results.
+2. Compliance follows [policies.md](policies.md) exactly (7.0 hours, 3 days a week, every working Wednesday, monthly average).
+3. Reprocessing a month never loses manual adjustments, overrides, holidays or leaves.
+4. Every data problem becomes an audit issue.
+5. A failed processing run leaves the previous results unchanged.",,attendance,ATT-E2
+113,Story,ATT-2.1 Pair swipes into visits,"As HR, I want swipes paired into visits automatically, so that office hours can be calculated without manual matching.
+Per employee, in time order: a checkout on the same or next day, up to 20 hours after a check-in, pairs with it. A check-in followed by another check-in
+becomes an open visit with no hours (*Missing checkout*). A checkout with no check-in, or one that is too late, is ignored (*Orphan checkout*). A check-in
+still pending at the end of the data becomes an open visit.
+Done when: 22:00 with a 05:00 checkout the next day gives one visit; a 21-hour gap gives no pair and two audit issues.
+
+Arch Review: Yes. State machine design and the 20-hour limit (the script used 18); pure function with typed input and output.",2,attendance,ATT-E2-arch-review
+114,Story,ATT-2.2 Assign each visit to a work day,"As HR, I want each visit assigned to the correct work date, so that night shifts count once.
+Normal shifts use the check-in date. For overnight shifts, a check-in after midnight up to shift end + 60 minutes belongs to the previous day. With no shift
+on file, an employee with more evening (17:00 or later) than morning (06:00 to 11:59) check-ins is treated as 18:00 to 06:00 and logged *Inferred overnight
+pattern*. Visits sharing a work date form one day group.
+Done when: with a `4:00 PM - 1:30 AM` shift, a 02:15 check-in belongs to the previous day (inside the 60-minute buffer).
+
+Arch Review: Yes. Buffer value, inference heuristic, and handling of clock times as UTC (no time-zone shifts).",2,attendance,ATT-E2-arch-review
+115,Story,ATT-2.3 Calculate hours,"As HR, I want hours calculated exactly as the script did, so that totals match.
+Visit hours are rounded to 2 decimals with ties to even, matching Python (JavaScript `Math.round` differs). The daily total is the sum of closed visits, and
+empty if none are closed. A day with a closed and an open visit shows the total but is flagged *Daily total is partial*. The month total sums the daily
+totals, treating empty as 0.
+Done when: rounding results equal Python's `round` on a set of known values.
+
+Arch Review: Yes. Rounding parity and the meaning of empty versus zero.",2,attendance,ATT-E2-arch-review
+116,Story,ATT-2.4 Month boundaries,"As HR, I want month edges handled safely, so that hours are never double counted or lost.
+The previous month's last day of swipes is loaded for pairing only, and visits that started in the previous month are dropped. A visit on the last day of
+the month is skipped and logged *Skipped - month boundary*, because its checkout may be in next month's file that isn't available yet.
+Done when: a last-day visit has no hours and one audit issue; a night shift from the last day of the previous month pairs but is not counted.
+
+Arch Review: Yes. A policy trade-off (see ATT-1.8) and a candidate for later change once next month's data exists.",2,attendance,ATT-E2-arch-review
+117,Story,ATT-2.5 Parse the roster,"As HR, I want shift, department, manager and email read from the roster, so that rules and views use correct data.
+The override shift wins over the base shift. Shift text such as `9:00 AM - 6:30 PM` (separators `to`, `-`, `–`) is parsed, with `12:xx AM` as hour 0 and
+`12:xx PM` as hour 12; unreadable text means no shift. Manager email is not in the roster, so it is resolved by matching the manager's name to another
+employee; unresolved names are listed in one audit issue.
+Done when: `12:30 AM - 9:00 AM` starts at hour 0; an unknown manager name leaves the email blank and appears in one issue.
+
+Arch Review: No",2,attendance,ATT-E2
+118,Story,ATT-2.6 Eligibility,"As a policy owner, I want exempt shifts excluded from the policy, so that it applies only to the right people.
+Employees on exactly the general shift `9:00 AM - 6:30 PM` are exempt and get `NA` for daily, weekly and monthly compliance. Every other shift, and
+employees with no shift, are evaluated.
+Done when: a general-shift employee has `NA` in all three compliance values.
+
+Arch Review: Yes. Treating an unknown shift as eligible is a policy choice that should be confirmed with the owner.",2,attendance,ATT-E2-arch-review
+119,Story,"ATT-2.7 Daily, weekly and monthly compliance","As HR, I want Yes / No / NA flags at three levels, so that I can see who meets the policy.
+Daily: `NA` if not eligible or no total, `No` below 7.0 hours, `Yes` at 7.0 or more. Weekly, using fixed 7-day blocks (1-7, 8-14, 15-21, 22-28, 29-end):
+`Yes` only if every working Wednesday is attended with 7+ hours and attended days are at least `min(3, working weekdays)`; holiday Wednesdays are not
+required; leaves do not change it. Monthly: `Yes` only if hours divided by working days is at least 7.0 (working days = weekdays minus holidays minus the
+employee's leaves; zero gives `No`) and every evaluated week is `Yes`.
+Done when: three 7+ hour days with a 6.5-hour Wednesday give a `No` week; a short last block of two weekdays needs only two attended days.
+
+Arch Review: Yes. Fixed blocks instead of calendar weeks, one source for constants, behaviour with holidays and leaves.",2,attendance,ATT-E2-arch-review
+120,Story,ATT-2.8 Audit issues,"As HR, I want every data problem recorded, so that nothing is dropped silently.
+Seven issue types are saved per month: missing checkout, orphan checkout, partial daily total, month boundary, inferred overnight pattern, no roster
+match, and manager email unresolved. An employee who is not in the roster still gets attendance rows (name from the swipe file, manager `NA`, eligible).
+Done when: swipes for an unknown ID produce rows and a *No roster match* issue.
+
+Arch Review: No",2,attendance,ATT-E2
+121,Story,ATT-2.9 Process a month,"As HR, I want one action to process a month, so that results update from the latest data.
+`POST /api/months/:ym/process` loads swipes, roster, holidays, leaves, fallback names and the previous month's last day, then runs the engine. In one
+transaction it deletes and re-inserts the month's attendance rows, audit issues and Wednesday rows and refreshes transport opt-in. Adjustments,
+overrides, holidays and leaves are kept. It returns 400 for a bad month and 404 if the movement file or roster is missing.
+Done when: an adjustment still applies after reprocessing; a mid-run failure leaves the old results in place.
+
+Arch Review: Yes. Transaction boundary, synchronous processing (may need a job queue at larger sizes), chunked inserts.",2,attendance,ATT-E2-arch-review
+122,Story,ATT-2.10 Parity and tests,"As a developer, I want golden tests against the Python output, so that a rule change cannot slip in unnoticed.
+Stored July and August expectations from the script are compared with the engine output. A deliberate rule change must update the golden files and
+[policies.md](policies.md) together.
+Done when: the golden suite passes in CI and fails if a constant such as the 7.0-hour threshold is changed.
+
+Arch Review: Yes. Fixture strategy and the process for changing a rule.",2,attendance,ATT-E2-arch-review
+3,Epic,ATT-E3 Upload and Data Management Dashboard,"The `/upload` page where HR loads and maintains everything the engine needs: roster, monthly movement file, optional transport list, public holidays and
+employee leaves. It has a card per file kind with validation, blank templates, a months list with status, upload history, a holiday calendar and a leave
+calendar, plus actions to process or delete a month.
+Scope: uploads, validation, templates, months, holidays, leaves, history. Out of scope: showing results (ATT-E4).
+
+Benefit:
+- HR prepares data without developer help.
+- Bad files are rejected with a clear reason before they can affect results.
+- A month can be re-run safely when inputs change.
+
+Acceptance criteria:
+1. Only `.csv` and `.xlsx` files are accepted, and each kind is validated.
+2. A failed upload changes nothing.
+3. The latest roster and transport files replace the old ones; a movement file replaces only its own month.
+4. The selected month is shared by all pages.
+5. Holidays and leaves can be maintained, and the page states when a reprocess is needed.",,attendance,ATT-E3
+123,Story,"ATT-3.1 Upload roster, movement and transport files","As HR, I want to upload each file type, so that a month can be processed.
+`POST /api/uploads` takes the kind and a file. A roster or transport upload replaces the existing one. A movement upload replaces only the month it
+belongs to (the month with the most swipes). A roster upload also rebuilds manager users (ATT-6.4). Everything runs in one database transaction, and
+swipe inserts are chunked for large files.
+Done when: a second movement upload for the same month leaves only the newer swipes; a corrupt file leaves the previous data untouched.
+
+Arch Review: Yes. Replace semantics, transaction scope and large-file insert limits.",3,attendance,ATT-E3-arch-review
+124,Story,ATT-3.2 Clear validation errors,"As HR, I want clear errors for a wrong file, so that I can fix it quickly.
+A wrong file type, missing header, no employees, no swipes or a bad date each returns a 400 with a specific message; date errors name the row number.
+Nothing is saved on error.
+Done when: a leaves file with a bad date on row 7 shows a message naming row 7.
+
+Arch Review: No",3,attendance,ATT-E3
+125,Story,ATT-3.3 Download blank templates,"As HR, I want a template for each file kind, so that I prepare data in the right format.
+`GET /api/templates/:kind` returns an `.xlsx` with the expected headers; each upload card has a download button.
+Done when: an unmodified template with data filled in uploads without errors.
+
+Arch Review: No",3,attendance,ATT-E3
+126,Story,ATT-3.4 Months list and status,"As HR, I want to see each month's status, so that I know what is ready.
+`GET /api/months` lists months with status (uploaded, processed). The selected month is kept in the URL and passed to every page.
+Done when: picking a month on one page opens the same month on the others.
+
+Arch Review: No",3,attendance,ATT-E3
+127,Story,ATT-3.5 Process or delete a month,"As HR, I want to run or remove a month, so that I control the results.
+Process runs the engine (ATT-2.9). Delete removes the month's processed data and uploads and asks for confirmation first.
+Done when: confirming Delete removes the month; cancelling changes nothing.
+
+Arch Review: No",3,attendance,ATT-E3
+128,Story,ATT-3.6 Upload history,"As HR, I want to see past uploads, so that I can trace what was loaded and when.
+`GET /api/uploads` returns the kind, file name and time of each upload, shown newest first.
+Done when: a new upload appears in the list immediately.
+
+Arch Review: No",3,attendance,ATT-E3
+129,Story,ATT-3.7 Public holiday calendar,"As HR, I want to set holidays for a month, so that policy is relaxed on those days.
+`GET` and `PUT /api/months/:ym/holidays` (PUT replaces the month's set). Holidays reduce working days and relax the weekly requirement. A note tells HR that
+the month must be reprocessed for compliance values to change.
+Done when: after reprocessing, a holiday Wednesday is no longer required.
+
+Arch Review: No",3,attendance,ATT-E3
+130,Story,ATT-3.8 Leave management,"As HR, I want to record employee leaves, so that working-day counts are fair.
+HR can search an employee and add, remove or replace their leave days on a calendar, or upload a leaves file (header aliases such as `emplid`, `empcode`,
+`date`; Excel or ISO dates). Leaves affect only the monthly ratio, not the weekly requirement.
+Done when: two leave days reduce that employee's working days by two after reprocessing.
+
+Arch Review: No",3,attendance,ATT-E3
+131,Story,ATT-3.9 Transport opt-in,"As HR, I want transport opt-in to show without reprocessing, so that changes appear at once.
+After a transport upload, `refreshTransportOptIn` updates the saved attendance rows of processed months. The flag is display data only and does not
+affect compliance.
+Done when: uploading a transport file updates the dashboard flag for an already processed month.
+
+Arch Review: Yes. A write path outside the normal processing transaction.",3,attendance,ATT-E3-arch-review
+4,Epic,ATT-E4 Attendance Dashboard and Reporting,"The `/dashboard` and `/audit` pages. After a month is processed, HR and managers review it through summary cards and filters and four tabs (Employee,
+Manager, Ledger, Directory). HR can correct a day's hours when swipes are wrong, review all data issues on the Audit Log page, and export the month to
+Excel.
+Scope: viewing, filters, adjustments, audit page, export. Out of scope: restricting a manager to their own team (backlog).
+
+Benefit:
+- Answers ""who is compliant, and why?"" within seconds.
+- Manual corrections are visible, reversible and never overwrite engine results.
+- The Excel export lets results be shared and archived.
+
+Acceptance criteria:
+1. The dashboard and the export show the same rows, with adjustments applied.
+2. Filters work on monthly compliance, week, weekly compliance and transport.
+3. Manual changes are marked (`add`, `edit`, `delete`) and can be undone.
+4. Every page has loading, empty and error states.
+5. Downloads work while signed in.",,attendance,ATT-E4
+132,Story,ATT-4.1 Summary cards and filters,"As HR, I want totals and filters, so that I can narrow down to what matters.
+Cards show total employees, daily hours entries, total work hours logged and check-in sessions. Filters cover monthly compliance, week, weekly
+compliance and transport opt-in. Data comes from `GET /api/months/:ym/attendance`.
+Done when: applying a filter updates the cards and every tab.
+
+Arch Review: No",4,attendance,ATT-E4
+133,Story,ATT-4.2 Employee tab,"As a viewer, I want one employee's days and flags, so that I can explain their result.
+Shows each day's visits, daily total and compliance flag, with open visits and adjusted rows clearly marked, plus the employee's weekly and monthly
+compliance.
+Done when: an open visit is shown with no hours and a visible marker.
+
+Arch Review: No",4,attendance,ATT-E4
+134,Story,ATT-4.3 Manager tab,"As a manager, I want my team's hours and compliance, so that I can follow up.
+Rows are grouped by manager email from the roster, with counts and totals and a jump to an employee. Currently every signed-in user can see every manager
+(see backlog).
+Done when: the team total equals the sum of the team's rows.
+
+Arch Review: No",4,attendance,ATT-E4
+135,Story,ATT-4.4 Ledger tab,"As HR, I want every row in one searchable table, so that I can check details.
+Shows all visit rows of the month with search; pagination or a virtual list is added if volume grows.
+Done when: the row count equals the Excel export.
+
+Arch Review: No",4,attendance,ATT-E4
+136,Story,ATT-4.5 Directory tab,"As HR, I want an employee directory, so that I can see department, shift, manager and transport opt-in in one place.
+Lists employees with a link to their detail; employees not in the roster appear with an *Unassigned* shift.
+Done when: an employee missing from the roster is listed as Unassigned.
+
+Arch Review: No",4,attendance,ATT-E4
+137,Story,ATT-4.6 Adjust daily hours,"As HR, I want to add, edit or delete a day's hours, so that missed swipes and approved corrections are reflected.
+`PUT /api/months/:ym/hours` accepts hours (0 to 24) for a date in the month; one adjustment per employee per day. The action is derived: engine rows exist
+gives `edit` or `delete`; no rows but the employee has others that month gives `add`; no rows at all gives 404. Adjustments are stored separately and
+applied on read, so engine output is never overwritten. The daily total and daily flag are recomputed; weekly and monthly flags are not. An `add` is
+ignored if swipes later appear for that date. `DELETE /api/months/:ym/hours/:employeeId/:date` restores the engine value.
+Done when: editing to 7.5 hours gives a `Yes` daily flag and an `edit` marker; undoing restores the engine value.
+
+Arch Review: Yes. Separation from engine data, the known mismatch between daily and weekly/monthly flags, and the missing audit trail.",4,attendance,ATT-E4-arch-review
+138,Story,ATT-4.7 Audit Log page,"As HR, I want to see and filter all issues, so that I can find the cause of an unexpected number.
+`GET /api/months/:ym/audit` lists the issues, filterable by type and searchable by employee name or ID.
+Done when: filtering by *Missing checkout* shows only those issues.
+
+Arch Review: No",4,attendance,ATT-E4
+139,Story,ATT-4.8 Excel export,"As HR, I want to download the month as Excel, so that I can share or archive it.
+`GET /api/months/:ym/export.xlsx` builds the workbook with ExcelJS from the same rows as the dashboard, including adjustments. The browser uses
+`downloadFile` (a fetch with the Bearer token saved through a temporary object URL), because a plain link cannot send the Authorization header.
+Done when: a signed-in user downloads a file with the month in its name; an expired token sends the user to sign in.
+
+Arch Review: Yes. The authenticated download pattern, and in-memory building that may need streaming for very large months.",4,attendance,ATT-E4-arch-review
+140,Story,"ATT-4.9 Loading, empty and error states","As a user, I want clear page states, so that I know whether data is loading, missing or failed.
+A shared `useAsync` hook and common components show a spinner, an empty message or an error with a retry on every page.
+Done when: a failed call shows an error message and a retry action.
+
+Arch Review: No",4,attendance,ATT-E4
+5,Epic,ATT-E5 Wednesday Attendance Dashboard,"The `/wednesday` page supports the policy that everyone should be in the office on Wednesdays. When a month is processed, one record per employee per
+Wednesday is saved. The page shows an employee-by-Wednesday matrix, turnout against the 75% target, attendance tiers and summary statistics, and lets HR
+override a single entry.
+Scope: matrix, statistics, tiers, overrides, holiday handling. Out of scope: the weekly 7-hour rule (ATT-2.7).
+
+Benefit:
+- Leadership can see turnout on the policy's key day and whether the 75% target is met.
+- HR can record exceptions without changing swipe data.
+- Holiday Wednesdays do not distort the figures.
+
+Acceptance criteria:
+1. Every employee in the roster has a record for every Wednesday of the month.
+2. Turnout, headcount, peak and lowest dates, tiers and distribution follow [policies.md](policies.md) section 9.
+3. Overrides can be set, changed and cleared, and survive reprocessing.
+4. Holiday Wednesdays are excluded from all figures.",,attendance,ATT-E5
+141,Story,ATT-5.1 Wednesday matrix,"As HR, I want each employee against each Wednesday, so that I can see attendance at a glance.
+Attended means the employee has a work day on that date, with any hours, including an open visit; this is separate from the 7-hour rule. Everyone in the
+roster gets a row, including people with no swipes. Data comes from `GET /api/months/:ym/wednesday`.
+Done when: a 3-hour visit on a Wednesday shows as attended.
+
+Arch Review: No",5,attendance,ATT-E5
+142,Story,ATT-5.2 Turnout against target,"As leadership, I want turnout against the 75% target, so that I can see whether the policy is working.
+Shows turnout per Wednesday, headcount per date, and the peak and lowest dates (the first one on a tie).
+Done when: 60 of 80 staff attending shows 75% turnout and the target as met.
+
+Arch Review: No",5,attendance,ATT-E5
+143,Story,ATT-5.3 Attendance tiers,"As leadership, I want employees grouped by Wednesday attendance, so that I can see the spread.
+Tiers: Perfect (all working Wednesdays), High (75% or more), Moderate (50% or more), Low (above 0 and under 50%), Zero. Also shows average days attended,
+total footfall and the distribution of days.
+Done when: 3 of 4 Wednesdays places an employee in High.
+
+Arch Review: No",5,attendance,ATT-E5
+144,Story,ATT-5.4 Override an entry,"As HR, I want to mark one person present or absent for a Wednesday, so that exceptions are recorded.
+`PUT /api/months/:ym/wednesday` with `{employeeId, wednesday, attended}`; `null` removes the override. Overrides are stored in a separate table, apart from
+engine data, and survive reprocessing.
+Done when: an override still applies after the month is reprocessed.
+
+Arch Review: Yes. Separation from engine data, precedence rules and the missing audit trail.",5,attendance,ATT-E5-arch-review
+145,Story,ATT-5.5 Holiday handling,"As HR, I want holiday Wednesdays excluded, so that nobody is penalised for them.
+Holiday Wednesdays are not required and not counted. Holidays are read live, so a holiday edit shows on this page without reprocessing, unlike the
+weekly and monthly compliance values.
+Done when: marking a Wednesday as a holiday removes it from the target figures immediately.
+
+Arch Review: Yes. Live reads versus stored results, and the temporary inconsistency with the weekly rule until reprocessing.",5,attendance,ATT-E5-arch-review
+146,Story,ATT-5.6 Estimated hours,"As leadership, I want an estimate of office hours, so that summaries show effort as well as headcount.
+Each attended Wednesday is credited as an estimated 8.0 in-office hours (`HOURS_PER_DAY`) in the summary figures.
+Done when: three attended Wednesdays show 24 estimated hours.
+
+Arch Review: No",5,attendance,ATT-E5
+6,Epic,ATT-E6 Access Control and Okta Sign-in,"Sign-in and authorisation for the whole application. Authentication uses Okta (OIDC Authorization Code with PKCE). Authorisation is separate: an Okta user
+can enter only if listed in the `app_users` table as superadmin, HR or manager. Managers are created from each roster upload, HR users are added by the
+superadmin on the Access page, and the superadmin is a database row. Every API call except `/api/health` is verified.
+Scope: sign-in, token verification, roles, Access page, sign-out, demo mode, go-live checklist. Out of scope: restricting data by manager (backlog).
+
+Benefit:
+- Company single sign-on and MFA, with no separate passwords to manage.
+- Access changes take effect on the next request.
+- Manager access follows the roster automatically, so it needs no second list.
+- The application can still run locally without Okta.
+
+Acceptance criteria:
+1. A signed-out user is redirected to Okta and returned to the requested page.
+2. A signed-in user not in `app_users` sees an Access denied screen (403); a missing or invalid token gets 401.
+3. Roles are enforced: only the superadmin can use `/api/admin`.
+4. Each roster upload rebuilds the manager users without touching HR or superadmin rows.
+5. Signing out ends both the app session and the Okta session.
+6. With Okta unset the app runs in demo mode; placeholder values stop the app from starting.
+7. The go-live checklist has passed against a real Okta tenant (open item).",,attendance,ATT-E6
+147,Story,ATT-6.1 Single sign-on,"As a user, I want to sign in through Okta, so that I use my company login.
+`AuthGate` handles `/login/callback`, redirects signed-out users to Okta with a PKCE challenge, and returns them to the page they asked for. Tokens are
+kept in `sessionStorage` and renewed automatically; if silent renewal is blocked, a 401 triggers a fresh login (at most once a minute).
+Done when: a signed-out user opening `/dashboard` lands on `/dashboard` after signing in.
+
+Arch Review: Yes. PKCE flow, token storage in `sessionStorage` (XSS trade-off) and renewal behaviour.",6,attendance,ATT-E6-arch-review
+148,Story,ATT-6.2 Access denied and sign-in failed screens,"As a user, I want a clear message when I can't get in, so that I know what to do next.
+A 403 shows Access denied with the refused email and an option to switch account. A 401 or other failure shows Sign-in failed with a retry.
+Done when: a user who is not in `app_users` sees the screen with their email.
+
+Arch Review: No",6,attendance,ATT-E6
+149,Story,ATT-6.3 Protected API,"As a security owner, I want every API call verified, so that only authorised users get data.
+Middleware on `/api` (except `/api/health`) verifies the token with `jose`: signature through cached Okta keys, issuer, audience, RS256 and expiry.
+Identifiers are `preferred_username`, `email` and `sub` when it contains `@`, or the single claim set in `OKTA_IDENTITY_CLAIM`. The user is looked up with
+`email IN ids OR username IN ids`, the highest role wins, and the lookup runs on every request. A missing token gives 401, an unlisted user 403, and an
+invalid issuer setting stops the app from starting.
+Done when: a request with no token gets 401; a valid token for an unlisted user gets 403.
+
+Arch Review: Yes. Claim choice, audience configuration, per-request database lookup and key caching.",6,attendance,ATT-E6-arch-review
+150,Story,ATT-6.4 Managers follow the roster,"As HR, I want manager access to come from the roster, so that I don't maintain it twice.
+Each roster upload replaces all `manager` rows with the distinct, lower-cased manager emails from the file, in the upload's transaction. HR and superadmin
+rows are never touched. A manager removed from the roster loses access after the next upload. Email matching is exact, so an alias is denied.
+Done when: a roster with manager `a@x.com` lets them sign in; re-uploading without them gives 403.
+
+Arch Review: Yes. Derived access, transaction scope and the alias mismatch risk.",6,attendance,ATT-E6-arch-review
+151,Story,ATT-6.5 Manage HR users,"As a superadmin, I want to add and remove HR users, so that I control who can use the app.
+The Access page (superadmin only) lists users, adds an HR user with an optional username, and removes HR users, using `GET` and `POST /api/admin/users`
+and `DELETE /api/admin/users/:email`. Only the HR role can be added or removed; duplicates and invalid emails are rejected; managers are read-only.
+Done when: a newly added HR user can sign in at once; any other role gets 403 on `/api/admin`.
+
+Arch Review: No",6,attendance,ATT-E6
+152,Story,ATT-6.6 Sign out,"As a user, I want to sign out fully, so that nobody can reuse my session.
+Local tokens are cleared first, then the Okta session is ended using the ID token as a hint and a post-logout redirect to the app. If that call fails, the
+browser goes to `/`.
+Done when: after signing out, opening the app asks for a new login.
+
+Arch Review: No",6,attendance,ATT-E6
+153,Story,ATT-6.7 Flexible Okta setup,"As an administrator, I want the app to work with different Okta server types, so that setup matches what the Okta team provides.
+A custom or default server (`/oauth2/<id>`) uses the access token with audience `OKTA_AUDIENCE`. The org server (no `/oauth2`) uses the ID token with
+audience equal to the client ID. The type is detected from the issuer URL on both frontend and backend.
+Done when: both setups accept a valid token and reject a wrong audience.
+
+Arch Review: Yes. Org-server access tokens are not meant for third-party APIs; the custom server is the recommended setup.",6,attendance,ATT-E6-arch-review
+154,Story,ATT-6.8 Demo mode,"As a developer, I want to run the app without Okta, so that I can work locally.
+An empty `OKTA_ISSUER` lets all requests through and logs a warning. Placeholder values (`<...>`) make the app refuse to start.
+Done when: with Okta unset, the API answers without a token.
+
+Arch Review: Yes. The production risk of an accidentally empty setting.",6,attendance,ATT-E6-arch-review
+155,Story,ATT-6.9 Go-live checklist and bootstrap,"As the project owner, I want a documented go-live path, so that release is predictable.
+The superadmin is created with a documented SQL insert. The checklist covers: sign in through Okta, a denied user, a no-token 401, a roster manager and an
+added HR user. The Okta team has a handover document ([OKTA_INTEGRATION.md](OKTA_INTEGRATION.md)). The live test on a real tenant is still to be done.
+Done when: every checklist step passes in the target environment.
+
+Arch Review: No",6,attendance,ATT-E6

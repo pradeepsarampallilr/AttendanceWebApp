@@ -30,7 +30,6 @@ export interface Visit {
   employeeId: string;
   checkIn: Date;
   checkOut: Date | null;
-  fromPreviousMonth: boolean;
 }
 
 export interface AuditIssue {
@@ -61,7 +60,7 @@ export interface AttendanceRow {
   visitHours: number | null;
   dailyTotalHours: number | null;
   shiftLabel: string;
-  eligibility: "Yes" | "No";
+  eligibility: "Yes" | "No" | "NA";
   compliant: "Yes" | "No" | "NA";
   weekCompliant: "Yes" | "No" | "NA";
   monthCompliant: "Yes" | "No" | "NA";

@@ -4,7 +4,8 @@
 import { useEffect, useState } from 'react';
 import { api, type EmployeeHit } from '../api';
 import { useAsync } from '../useAsync';
-import { Notice } from './dashboard/shared';
+import { useConfirm } from './ConfirmModal';
+import { Toast } from './dashboard/shared';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -23,6 +24,7 @@ export default function LeaveCalendar({ initialMonth }: { initialMonth: string }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [ask, modal] = useConfirm();
   const stored = useAsync(() => (employee ? api.employeeLeaves(ym, employee.employeeId) : Promise.resolve([] as string[])), [ym, employee?.employeeId]);
 
   useEffect(() => { if (initialMonth) setYm(initialMonth); }, [initialMonth]);
@@ -67,12 +69,15 @@ export default function LeaveCalendar({ initialMonth }: { initialMonth: string }
     }
   }
 
+  const legend = (cls: string, text: string) => (
+    <span className="inline-flex items-center gap-1.5"><span className={`w-3 h-3 rounded ${cls}`} />{text}</span>
+  );
   return (
-    <section>
+    <section className="flex flex-col">
       <h2 className="font-semibold mb-2">Employee leaves</h2>
-      <div className="bg-white border border-slate-200 rounded-lg p-4 flex flex-col items-center">
+      <div className="bg-white border border-slate-200 rounded-lg p-4 flex flex-col items-center flex-1">
         <div className="w-full max-w-md">
-          <div className="relative mb-4">
+          <div className="relative mb-4 h-20">
             <input
               className="field w-full"
               placeholder="Search employee by name or ID…"
@@ -133,24 +138,26 @@ export default function LeaveCalendar({ initialMonth }: { initialMonth: string }
               );
             })}
           </div>
+          <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 mt-3 text-xs text-slate-500">
+            {legend('bg-emerald-500', 'Saved leave')}
+            {legend('bg-amber-400', 'New (unsaved)')}
+            {legend('border-2 border-rose-400', 'Removed (unsaved)')}
+            {legend('bg-slate-100 border border-slate-200', 'Weekend')}
+          </div>
           <div className="flex flex-wrap items-center justify-between gap-3 mt-4">
-            <span className="text-sm text-slate-600">
-              {employee ? `${picked.size} leave ${picked.size === 1 ? 'day' : 'days'} selected` : 'Select an employee to edit leaves'}
-              {dirty && <span className="text-amber-700"> · unsaved changes</span>}
-            </span>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 ml-auto">
               <button className="btn btn-secondary" onClick={() => { setSaved(false); setPicked(new Set()); }} disabled={busy || picked.size === 0}>Clear all</button>
-              <button className="btn btn-secondary" onClick={() => { setSaved(false); setPicked(new Set(stored.data ?? [])); }} disabled={busy || !dirty}>Undo changes</button>
-              <button className="btn btn-primary" onClick={save} disabled={busy || !dirty}>{busy ? 'Saving…' : 'Save'}</button>
+              <button className="btn btn-primary" onClick={() => ask({ title: 'Save leaves?', confirmLabel: 'Save', message: `Save leaves for ${employee?.name ?? 'this employee'}?` }, save)} disabled={busy || !dirty}>{busy ? 'Saving…' : 'Save'}</button>
             </div>
           </div>
           <div className="min-h-9 mt-2 flex justify-center items-center text-sm">
-            {error && <Notice tone="error" onClose={() => setError(null)}>{error}</Notice>}
+            {error && <Toast tone="error" onClose={() => setError(null)}>{error}</Toast>}
             {stored.error && <span role="alert" className="text-red-700">{stored.error}</span>}
-            {saved && !dirty && <Notice tone="success" onClose={() => setSaved(false)}>Saved. Reprocess the month to apply.</Notice>}
+            {saved && !dirty && <Toast tone="success" onClose={() => setSaved(false)}>Saved. Reprocess the month to apply.</Toast>}
           </div>
         </div>
       </div>
+      {modal}
     </section>
   );
 }

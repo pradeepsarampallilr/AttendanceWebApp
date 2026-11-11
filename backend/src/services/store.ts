@@ -33,13 +33,13 @@ export async function insertSwipeEvents(m: EntityManager, uploadId: number, even
   return ids.length;
 }
 
-/** Swipes of a month's movement upload, or (`before`) every swipe earlier than a date, grouped by employee. */
-export async function loadEvents(m: EntityManager, scope: { month: DateStr } | { before: DateStr }): Promise<EventsByEmployee> {
+/** Swipes of a month's movement upload, or (`from` .. `before`) every swipe in that date range, grouped by employee. */
+export async function loadEvents(m: EntityManager, scope: { month: DateStr } | { from: DateStr; before: DateStr }): Promise<EventsByEmployee> {
   const qb = m.getRepository(SwipeEvent).createQueryBuilder("s")
     .select("s.employeeId", "employeeId").addSelect("s.at", "at").addSelect("s.kind", "kind")
     .orderBy("s.at").addOrderBy("s.id");
   if ("month" in scope) qb.where(`s.uploadId IN ${monthUploadIds(qb, scope.month)}`);
-  else qb.where("s.at < :before", { before: scope.before });
+  else qb.where("s.at >= :from AND s.at < :before", scope);
   const out: EventsByEmployee = new Map();
   for (const r of await qb.getRawMany<{ employeeId: string; at: string; kind: "in" | "out" }>()) {
     let list = out.get(r.employeeId);
@@ -70,11 +70,11 @@ export async function loadRoster(m: EntityManager) {
   return { roster, unresolvedManagers: [...unresolved].sort() };
 }
 
-/** Recompute attendance_visits.transport_opt_in: NA for general-shift (ineligible) staff, else Yes/No by transport sheet. */
+/** Recompute attendance_visits.transport_opt_in: NA for staff outside the policy (general shift / no shift), else Yes/No by transport sheet. */
 export async function refreshTransportOptIn(m: EntityManager, month?: string) {
   const qb = m.createQueryBuilder().update(AttendanceVisit).set({
     transportOptIn: () => `CASE
-      WHEN eligibility = 'No' THEN 'NA'
+      WHEN eligibility <> 'Yes' THEN 'NA'
       WHEN EXISTS (SELECT 1 FROM transport_employees t WHERE t.employee_id = attendance_visits.employee_id) THEN 'Yes'
       ELSE 'No' END`,
   });

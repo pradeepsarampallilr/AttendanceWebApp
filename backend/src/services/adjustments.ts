@@ -2,7 +2,7 @@
  * Applies manual hour changes (add, edit, delete) on top of the calculated attendance rows.
  * Re-checks compliance after each change.
  */
-import { round2, weekNumberInMonth } from "../engine/core.js";
+import { round2, calendarWeek } from "../engine/core.js";
 import { evaluateCompliance } from "../engine/policy.js";
 
 export type AdjustmentAction = "add" | "edit" | "delete";
@@ -36,7 +36,7 @@ export function applyAdjustments<T extends ApiRow>(rows: T[], adjustments: Adjus
     } else if (a.action === "add" && a.hours !== null) {
       const tpl = out.find((r) => r.employeeId === a.employeeId);
       if (!tpl) continue;
-      added.push({ ...tpl, workDate: a.workDate, week: weekNumberInMonth(a.workDate), checkIn: null, checkOut: null,
+      added.push({ ...tpl, workDate: a.workDate, week: calendarWeek(a.workDate), checkIn: null, checkOut: null,
         visitHours: null, dailyTotalHours: round2(a.hours), isFirstRowOfDayGroup: true, rowsInDayGroup: 0,
         compliant: evaluateCompliance(tpl.eligibility, a.hours), adjustment: "add" });
     }

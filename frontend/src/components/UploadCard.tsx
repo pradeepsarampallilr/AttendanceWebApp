@@ -2,10 +2,11 @@
  * A box where the user drags in or picks a CSV/Excel file to upload, with a link to the template.
  * Shows success or error messages.
  */
+import { useConfirm } from './ConfirmModal';
 import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { downloadFile } from '../api';
-import { Notice } from './dashboard/shared';
+import { Toast } from './dashboard/shared';
 
 const OK = /\.(csv|xlsx)$/i;
 
@@ -23,6 +24,7 @@ export default function UploadCard({
   onDone: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
+  const [ask, modal] = useConfirm();
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +49,12 @@ export default function UploadCard({
       if (input.current) input.current.value = '';
     }
   }
+
+  const confirmSend = (file: File | undefined) => {
+    if (!file) return;
+    ask({ title: `Upload ${title}?`, confirmLabel: 'Upload', message: `Upload ${file.name}? It is added to the data used for processing.` }, () => send(file));
+    if (input.current) input.current.value = '';
+  };
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-4">
@@ -78,7 +86,7 @@ export default function UploadCard({
         onDrop={(e) => {
           e.preventDefault();
           setDrag(false);
-          send(e.dataTransfer.files[0]);
+          confirmSend(e.dataTransfer.files[0]);
         }}
         className={`border-2 border-dashed rounded-md p-6 text-center text-sm cursor-pointer ${
           drag ? 'border-blue-500 bg-blue-50' : 'border-slate-300 hover:bg-slate-50'
@@ -97,13 +105,14 @@ export default function UploadCard({
           type="file"
           accept=".csv,.xlsx"
           className="hidden"
-          onChange={(e) => send(e.target.files?.[0])}
+          onChange={(e) => confirmSend(e.target.files?.[0])}
         />
       </div>
-      {error && <Notice tone="error" className="mt-3" onClose={() => setError(null)}>{error}</Notice>}
+      {error && <Toast tone="error" onClose={() => setError(null)}>{error}</Toast>}
       {result && (
-        <Notice tone="success" className="mt-3" onClose={() => setResult(null)}>{result}</Notice>
+        <Toast tone="success" onClose={() => setResult(null)}>{result}</Toast>
       )}
+      {modal}
     </div>
   );
 }

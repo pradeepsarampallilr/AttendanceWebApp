@@ -4,10 +4,6 @@
  */
 import type { RosterEntry, ShiftWindow } from "./types.js";
 
-export const GENERAL_SHIFT_LABEL = "9:00 AM - 6:30 PM";
-export const GENERAL_SHIFT_WINDOW: ShiftWindow = {
-  startMinutes: 9 * 60, endMinutes: 18 * 60 + 30, label: GENERAL_SHIFT_LABEL,
-};
 export const INFERRED_NIGHT_SHIFT: ShiftWindow = {
   startMinutes: 18 * 60, endMinutes: 6 * 60, label: "Unassigned (inferred overnight pattern)",
 };

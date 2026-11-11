@@ -4,7 +4,7 @@
  */
 import { getAccessToken, oktaAuth } from './auth';
 
-export type UploadKind = 'roster' | 'movement' | 'transport';
+export type UploadKind = 'roster' | 'movement' | 'transport' | 'leaves';
 
 export interface UploadResult {
   id: number;
@@ -22,7 +22,20 @@ export interface UploadRow {
   month: string | null;
   rowCount: number;
   status: string;
+  uploadedBy: string;
   uploadedAt: string;
+}
+
+export interface Page<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface Holiday {
+  date: string;
+  description: string;
 }
 
 export interface MonthRow {
@@ -109,27 +122,88 @@ async function request<T>(url: string, init?: RequestInit, noRedirect = false): 
   return body as T;
 }
 
-export type Role = 'superadmin' | 'hr' | 'manager';
+export type Role = 'superadmin' | 'hr' | 'manager' | 'employee';
 export interface Me {
   email: string | null;
   role: Role | null;
+  employeeId?: string | null;
 }
+/** One reporting line: `managerId` is above `employeeId` by `depth` levels (1 = direct report). */
+export interface TeamLine { managerId: string; managerName: string; employeeId: string; depth: number }
 export interface AppUserRow {
   email: string;
   username: string | null;
   name: string;
   role: Role;
+  isActive: boolean;
+  employeeId: string | null;
+}
+export interface ActivityRow {
+  id: string;
+  at: string;
+  actorEmail: string;
+  actorRole: string;
+  action: string;
+  entity: string;
+  detail: string;
 }
 
+const qs = (o: Record<string, string | number | undefined>) =>
+  new URLSearchParams(Object.entries(o).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)])).toString();
+
 export const accessApi = {
-  list: () => request<AppUserRow[]>('/api/admin/users'),
-  addHr: (email: string, username: string) => request<AppUserRow>('/api/admin/users', json('POST', { email, username })),
+  list: (p: { page: number; pageSize: number; q?: string; role?: string }) => request<Page<AppUserRow>>(`/api/admin/users?${qs(p)}`),
+  add: (email: string, username: string, role: Role) => request<AppUserRow>('/api/admin/users', json('POST', { email, username, role })),
+  update: (email: string, patch: { isActive?: boolean; role?: Role }) =>
+    request<AppUserRow>(`/api/admin/users/${encodeURIComponent(email)}`, json('PATCH', patch)),
   remove: (email: string) => request<null>(`/api/admin/users/${encodeURIComponent(email)}`, { method: 'DELETE' }),
+  activity: (p: { page: number; pageSize: number; q?: string }) => request<Page<ActivityRow>>(`/api/admin/audit-logs?${qs(p)}`),
 };
+
+export interface SettingRow {
+  key: string;
+  label: string;
+  description: string;
+  unit: string;
+  min: number;
+  max: number;
+  /** Names for the values min..max; when present the setting is picked from a list. */
+  options?: string[];
+  value: number;
+  default: number;
+}
+
+export const settingsApi = {
+  list: () => request<SettingRow[]>('/api/admin/settings'),
+  save: (values: Record<string, number>) => request<SettingRow[]>('/api/admin/settings', json('PUT', values)),
+};
+
+export interface RulesDoc {
+  version: string;
+  anchorDay: string;
+  summary: { rule: string; value: string }[];
+  sections: { title: string; points: string[] }[];
+  changelog: { version: string; date: string; changes: string[] }[];
+}
+
+export interface WeeklyRow {
+  employeeId: string;
+  employeeName: string;
+  department: string;
+  weekStart: string;
+  week: number;
+  required: number;
+  attended: number;
+  anchor: 'present' | 'absent' | 'off';
+  status: Tri;
+}
 
 export const api = {
   me: () => request<Me>('/api/me', undefined, true),
-  uploads: () => request<UploadRow[]>('/api/uploads'),
+  team: () => request<TeamLine[]>('/api/team'),
+  uploads: (page: number, pageSize: number) => request<Page<UploadRow>>(`/api/uploads?${qs({ page, pageSize })}`),
+  rules: () => request<RulesDoc>('/api/rules'),
+  weekly: (ym: string) => request<WeeklyRow[]>(`/api/months/${ym}/weekly`),
   months: () => request<MonthRow[]>('/api/months'),
   upload: (kind: UploadKind, file: File) => {
     const fd = new FormData();
@@ -141,7 +215,7 @@ export const api = {
     request<ProcessResult>(`/api/months/${ym}/process`, { method: 'POST' }),
   deleteMonth: (ym: string) => request<null>(`/api/months/${ym}`, { method: 'DELETE' }),
   audit: (ym: string) => request<AuditRow[]>(`/api/months/${ym}/audit`),
-  holidays: (ym: string) => request<string[]>(`/api/months/${ym}/holidays`),
+  holidays: (ym: string) => request<Holiday[]>(`/api/months/${ym}/holidays`),
   uploadLeaves: (file: File) => {
     const fd = new FormData();
     fd.append('file', file);
@@ -152,7 +226,7 @@ export const api = {
     request<string[]>(`/api/months/${ym}/employees/${encodeURIComponent(employeeId)}/leaves`),
   saveEmployeeLeaves: (ym: string, employeeId: string, employeeName: string, dates: string[]) =>
     request<string[]>(`/api/months/${ym}/employees/${encodeURIComponent(employeeId)}/leaves`, json('PUT', { dates, employeeName })),
-  saveHolidays: (ym: string, dates: string[]) => request<string[]>(`/api/months/${ym}/holidays`, json('PUT', { dates })),
+  saveHolidays: (ym: string, holidays: Holiday[]) => request<Holiday[]>(`/api/months/${ym}/holidays`, json('PUT', { holidays })),
 };
 
 export const toYm = (month: string) => month.slice(0, 7);
@@ -176,7 +250,7 @@ export interface AttendanceRow {
   isFirstRowOfDayGroup: boolean;
   rowsInDayGroup: number;
   shiftLabel: string | null;
-  eligibility: 'Yes' | 'No';
+  eligibility: Tri;
   transportOptIn: Tri;
   compliant: Tri;
   weekCompliant: Tri;
@@ -197,6 +271,9 @@ export const attendanceApi = {
 export interface WednesdayEmployee {
   employeeId: string;
   name: string;
+  email: string;
+  department: string;
+  shift: string | null;
   attended: Record<string, boolean>;
 }
 export interface WednesdayData {

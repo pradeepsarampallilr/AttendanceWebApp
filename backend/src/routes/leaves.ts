@@ -4,11 +4,14 @@ import multer from "multer";
 import { ILike, Like } from "typeorm";
 import { AppDataSource } from "../db.js";
 import { ValidationError, leavesFromTable, readTable } from "../io/tables.js";
-import { Leave, RosterEmployee } from "../models/index.js";
+import { Leave, RosterEmployee, Upload } from "../models/index.js";
+import { requireWrite } from "../services/access.js";
+import { logAction } from "../services/audit.js";
 import { insertChunked } from "../services/store.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 export const leavesRouter = Router();
+leavesRouter.use(requireWrite);
 
 leavesRouter.post("/upload", upload.single("file"), async (req, res) => {
   const file = req.file;
@@ -25,10 +28,12 @@ leavesRouter.post("/upload", upload.single("file"), async (req, res) => {
   const months = [...new Set(list.map((l) => l.leaveDate.slice(0, 7)))].sort();
   await AppDataSource.transaction(async (m) => {
     const names = new Map((await m.find(RosterEmployee, { select: { employeeId: true, name: true } })).map((r) => [r.employeeId, r.name]));
+    await m.insert(Upload, { kind: "leaves", filename: file.originalname, rowCount: list.length, uploadedBy: req.userEmail ?? "" });
     for (let i = 0; i < list.length; i += 1000) {
       await m.upsert(Leave, list.slice(i, i + 1000).map((l) => ({ ...l, employeeName: l.employeeName || names.get(l.employeeId) || "" })), ["employeeId", "leaveDate"]);
     }
   });
+  await logAction(req, "upload leaves", "upload", `${file.originalname}: ${list.length} leave days`);
   res.status(201).json({ filename: file.originalname, leaves: list.length, employees: new Set(list.map((l) => l.employeeId)).size, months });
 });
 

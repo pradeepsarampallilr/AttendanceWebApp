@@ -8,12 +8,12 @@ each rule is named so you can check it. If you change a rule, update this file t
 | Rule | Value | Where |
 |---|---|---|
 | Full-day hours threshold | **7.0 hours** | `COMPLIANT_MIN_HOURS` in `engine/core.ts` |
-| General shift (exempt) | **9:00 AM - 6:30 PM** | `GENERAL_SHIFT_WINDOW` in `engine/roster.ts` |
-| Required office days per week | **3 days** (each of 7+ hours), including every working Wednesday | `evaluateWeekCompliance` in `engine/policy.ts` |
-| Month target | average **7.0 hours per working day** and every week compliant | `evaluateMonthCompliance` in `engine/policy.ts` |
+| General shift (not evaluated) | starts **9:00 AM**, ends **6:00-6:30 PM** | `isGeneralShift` in `engine/policy.ts` |
+| Required office days per week | **min(3, 3 - public holidays - leaves)** days of 7+ hours, plus the Wednesday anchor | `evaluateWeek` in `engine/policy.ts` |
+| Month target | office days attended >= the **sum of every week's requirement** | `evaluateMonth` in `engine/policy.ts` |
 | Longest check-in to checkout | **20 hours** | `MAX_SHIFT_DURATION_MS` in `engine/core.ts` |
 | Overnight work-day buffer | shift end + **60 minutes** | `DAY_ATTRIBUTION_BUFFER_MIN` in `engine/core.ts` |
-| Week buckets | days 1-7, 8-14, 15-21, 22-28, 29-end | `weekNumberInMonth` in `engine/core.ts` |
+| Weeks | **calendar weeks**, Monday to Sunday, ISO week numbers | `weekStart`, `calendarWeek` in `engine/core.ts` |
 | Wednesday target (dashboard) | **75%** of staff | `TARGET_RATE` in `frontend/src/lib/wednesday.ts` |
 | Wednesday hours credit | **8.0 hours** per attended Wednesday | `HOURS_PER_DAY` in `frontend/src/lib/wednesday.ts` |
 
@@ -29,8 +29,8 @@ month's movement file.
 | **Roster** | yes (latest upload replaces the old one) | Shift, department, manager and email for each employee |
 | **Movement (door swipes)** | yes, one per month (a re-upload for the same month replaces it) | The raw check-in and checkout times |
 | **Transport** | no (latest upload replaces the old one) | Transport opt-in flag on each attendance row |
-| **Public holidays** | no, picked on the Upload page | Fewer working days and relaxed weekly requirement |
-| **Leaves** | no, uploaded or picked per employee | Fewer working days for that employee's month total |
+| **Public holidays** | no, picked on the Upload page, each with a description | Lower the weekly requirement for everyone |
+| **Leaves** | no, uploaded or picked per employee | Lower that employee's weekly requirement |
 
 ### 1.1 Roster rules (`engine/roster.ts`, `io/tables.ts`)
 - The header must have the expected columns, otherwise the upload is rejected.
@@ -107,11 +107,11 @@ An open visit has no hours (`null`). It is kept as a row so it can be seen, but 
 
 ## 5. Eligibility (`engine/policy.ts`)
 
-| Employee's shift | Eligible for the policy? |
-|---|---|
-| General shift `9:00 AM - 6:30 PM` (exactly) | **No**, all compliance values are `NA` |
-| Any other shift | **Yes** |
-| No shift (not in roster, or unreadable shift) | **Yes** |
+| Employee's shift | Eligibility | Compliance |
+|---|---|---|
+| General shift (starts `9:00 AM`, ends `6:00 PM` or `6:30 PM`) | **No** | all `NA` |
+| No shift (not in roster, or unreadable shift) | **NA** | all `NA` |
+| Any other shift | **Yes** | evaluated |
 
 Compliance results use three values: **Yes**, **No**, **NA** (not applicable).
 
@@ -121,42 +121,42 @@ Compliance results use three values: **Yes**, **No**, **NA** (not applicable).
 
 | Condition | Result |
 |---|---|
-| Not eligible, or the daily total is empty | `NA` |
+| Not eligible (eligibility is not `Yes`), or the daily total is empty | `NA` |
 | Daily total **below 7.0** hours | `No` |
 | Daily total **7.0 or more** | `Yes` |
 
 ---
 
-## 7. Weekly compliance (`evaluateWeekCompliance`)
+## 7. Weekly compliance (`evaluateWeek`)
 
-**Weeks** are fixed 7-day blocks of the month, not calendar weeks: days 1-7 are week 1, 8-14 week 2, 15-21 week 3, 22-28 week 4, and
-29 to the end of the month week 5.
+**Weeks are real calendar weeks**, Monday to Sunday, numbered with the ISO week number (`week` column). Only weekdays count.
 
-An **attended day** is a day with a daily total of **7.0 hours or more**. A week is `Yes` only if **both** conditions hold:
+An **attended day** is a day with a daily total of **7.0 hours or more**. Off days for an employee are the public holidays
+**and that employee's leave days** (weekdays only). For one week:
 
-1. **Every working Wednesday** in the block is an attended day. A Wednesday that is a public holiday is not required.
-2. The number of attended days is **at least the required number**:
-   - normally **3**;
-   - if the block has public holidays on weekdays: `min(3, weekdays in the block minus those holidays)`.
+- **Required days** = `max(0, min(3, 3 - off days))`. The working days in a week are therefore always 3 at most.
+- The **Wednesday anchor** must be an attended day, unless that Wednesday is a public holiday or the employee's leave day.
+- The week is `Yes` when the anchor passes **and** attended days >= required days. Not eligible gives `NA`.
 
-Not eligible gives `NA`. A week in which the employee has swipes but no day of 7+ hours is evaluated and is `No`. A week with no visits at all has no row, so it is not evaluated.
-Leaves do **not** change the weekly requirement.
+**A week that began last month.** The first week of a month is judged from its Monday when swipes from before the month are stored
+(the engine loads them back to that Monday). Without earlier data (the very first month) it is judged from the 1st, and the
+requirement never exceeds the working weekdays left in the data: `min(3 - off, weekdays available - off)`. The month's last day is
+skipped (section 3), so a week running past the month end is judged up to the day before. Such a week is judged again, with all its
+data, when the next month is processed.
 
-Example: a week with a holiday on Friday has 4 working weekdays, so the requirement stays at 3. A short week of only two
-working weekdays (for example the last block of a month) needs only 2.
+Every calendar week of the month is evaluated for every roster employee, including weeks with no swipes at all (stored in
+`weekly_compliance`, shown on the Dashboard's *Weekly Compliance* tab).
+
+Examples: a holiday on Friday makes the requirement 2. Leave on Wednesday and Thursday gives 1 and the Wednesday is not needed. A
+week with three off days needs 0.
 
 ---
 
-## 8. Monthly compliance (`evaluateMonthCompliance`)
+## 8. Monthly compliance (`evaluateMonth`)
 
-A month is `Yes` only if **both** hold:
-
-1. `total hours / working days >= 7.0`, where working days = the weekdays of the month minus public holidays minus **that
-   employee's leave days**. If working days are 0, the result is `No`.
-2. **Every evaluated week is `Yes`.**
-
-Not eligible gives `NA`. Weekends never count as working days. Leaves and holidays change only this ratio, so reprocess the month after editing
-them.
+The month is `Yes` when the **office days attended** in its calendar weeks reach the **sum of every week's required days**
+(`sum of max(0, min(3, 3 - off days))`). Not eligible gives `NA`. Weekly results do not have to all be `Yes`; the Wednesday
+anchor is a weekly rule. Reprocess the month after changing holidays or leaves.
 
 ---
 
@@ -226,11 +226,11 @@ Every data problem is stored per month, so nothing is silently dropped:
 | *Daily total is partial* | A day has a closed visit plus an open one, so the total may be too low |
 | *Skipped - month boundary* | A last-day visit was not calculated |
 | *Inferred overnight pattern* | An employee with no shift looked like a night worker |
-| *No roster match* | Swipes for an ID not in the roster (department, manager and shift stay blank, shift is "Unassigned") |
+| *No roster match* | Swipes for an ID not in the roster (department, manager and shift stay blank, shift is "Unassigned", eligibility `NA`) |
 | *Manager email unresolved* | Manager names not found in the roster |
 
 An employee who is **not in the roster** still gets attendance rows, using the name from the swipe file, with manager `NA` and
-eligibility `Yes`.
+eligibility `NA`.
 
 ---
 
@@ -244,8 +244,7 @@ eligibility `Yes`.
   weekly and monthly compliance values need a reprocess to change.
 - Rows are sorted by employee name, then work date, then check-in time.
 - Everything is handled as plain calendar dates and UTC clock times from the swipe file, so there are no time-zone shifts.
-- Results are checked against the original Python engine for July and August (golden files), so a change in these rules should be
-  expected to change those test results too.
+- The rules are covered by `backend/test/rules.test.ts`; the old Python-engine golden comparison was retired with the calendar-week rules.
 
 ---
 
@@ -262,5 +261,4 @@ An employee on a `10:00 AM - 7:00 PM` shift, in a week with no holidays:
 | Fri | 10:00 to 17:30 | 7.50 | Yes |
 
 Three days reach 7 hours, but the **Wednesday is under 7**, so **the week is `No`**. If the Wednesday had reached 7.0, the week would be `Yes`
-(3 or more attended days and every Wednesday attended). The month is `Yes` only if every week is `Yes` and total hours divided by working days
-is at least 7.0.
+(3 attended days and the Wednesday attended). The month is `Yes` when the 7-hour days across all its weeks reach the sum of the weekly requirements.

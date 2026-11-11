@@ -7,7 +7,7 @@ import { buildLedger, type EmployeeSummary } from '../../lib/attendance';
 import { Badge, Empty, Pager, dayName, hrs, th, time } from './shared';
 
 type Scope = 'all' | 'daily' | 'sessions';
-const PAGE = 10;
+const PAGE = 1; // one employee per page
 const td = 'px-4 py-3.5 align-middle whitespace-nowrap border-b border-r border-slate-300 last:border-r-0';
 const c = `${td} text-center`;
 

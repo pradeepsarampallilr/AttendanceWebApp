@@ -14,6 +14,11 @@ type State =
 
 const UserContext = createContext<Me>({ email: null, role: null });
 export const useUser = () => useContext(UserContext);
+/** HR and superadmin can change data; everyone else reads. Without Okta (local development) the server treats you as superadmin. */
+export const useCanEdit = () => {
+  const { role } = useUser();
+  return !oktaAuth || role === 'hr' || role === 'superadmin';
+};
 
 type Tone = 'neutral' | 'danger' | 'warn';
 

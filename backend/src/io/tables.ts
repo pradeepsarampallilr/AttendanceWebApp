@@ -76,7 +76,12 @@ const ROSTER_COLUMNS: [number, string][] = [
 
 export function assertRosterHeader(rows: unknown[][]) {
   const header = rows[0] ?? [];
-  const bad = ROSTER_COLUMNS.filter(([i, name]) => stripStar(header[i]).toLowerCase() !== name);
+  // Column 2's label is often mistyped in the source sheet ("Shit timing"), so only its "timing" ending is checked.
+  const matches = (i: number, name: string) => {
+    const h = stripStar(header[i]).toLowerCase();
+    return i === 1 ? h.endsWith("timing") : h === name;
+  };
+  const bad = ROSTER_COLUMNS.filter(([i, name]) => !matches(i, name));
   if (bad.length) {
     throw new ValidationError(`Roster file has unexpected columns; expected ${bad.map(([i, n]) => `"${n}" in column ${i + 1}`).join(", ")}`);
   }

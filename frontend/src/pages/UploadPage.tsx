@@ -3,14 +3,18 @@
  */
 import { useEffect, useState } from 'react';
 import { api, toYm, type ProcessResult, type UploadKind } from '../api';
+import { useAnchorDay } from '../lib/anchorDay';
 import { useAsync } from '../useAsync';
 import UploadCard from '../components/UploadCard';
 import HolidayCalendar from '../components/HolidayCalendar';
 import LeaveCalendar from '../components/LeaveCalendar';
-import ConfirmModal from '../components/ConfirmModal';
-import { Notice, Pager } from '../components/dashboard/shared';
+import MonthPicker from '../components/MonthPicker';
+import ConfirmModal, { useConfirm } from '../components/ConfirmModal';
+import { PageHeader, Pager, Toast } from '../components/dashboard/shared';
+import { DashboardIcon } from '../components/Icons';
 
-const HISTORY_PAGE = 10;
+const HISTORY_PAGE = 5;
+const MONTHS_PAGE = 5;
 
 async function sendKind(kind: UploadKind, file: File) {
   const r = await api.upload(kind, file);
@@ -23,15 +27,24 @@ const badge = (ok: boolean) =>
   `text-xs px-2 py-0.5 rounded-full ${ok ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`;
 
 export default function UploadPage({ onChanged, month }: { onChanged: () => void; month: string }) {
-  const uploads = useAsync(api.uploads, []);
+  const day = useAnchorDay();
+  const [historyPage, setHistoryPage] = useState(0);
+  const uploads = useAsync(() => api.uploads(historyPage + 1, HISTORY_PAGE), [historyPage]);
   const months = useAsync(api.months, []);
+  const [monthsPage, setMonthsPage] = useState(0);
+  const [monthFilter, setMonthFilter] = useState('');
+  const [ask, askModal] = useConfirm();
   const [busyYm, setBusyYm] = useState<string | null>(null);
   const [deleteYm, setDeleteYm] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, ProcessResult>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [historyPage, setHistoryPage] = useState(0);
-  const history = uploads.data ?? [];
-  const historyPages = Math.ceil(history.length / HISTORY_PAGE);
+  const history = uploads.data?.items ?? [];
+  const historyPages = Math.ceil((uploads.data?.total ?? 0) / HISTORY_PAGE);
+  const allMonths = months.data ?? [];
+  const shownMonths = monthFilter ? allMonths.filter((m) => toYm(m.month) === monthFilter) : allMonths;
+  const monthPages = Math.ceil(shownMonths.length / MONTHS_PAGE);
+  const pagedMonths = shownMonths.slice(monthsPage * MONTHS_PAGE, (monthsPage + 1) * MONTHS_PAGE);
+  useEffect(() => setMonthsPage((p) => Math.min(p, Math.max(monthPages - 1, 0))), [monthPages]);
   useEffect(() => setHistoryPage((p) => Math.min(p, Math.max(historyPages - 1, 0))), [historyPages]);
 
   const refresh = () => {
@@ -70,7 +83,8 @@ export default function UploadPage({ onChanged, month }: { onChanged: () => void
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
+      <PageHeader icon={<DashboardIcon className="h-5 w-5" />} title="Dashboard" sub="Upload the roster, monthly check-ins, transport and leaves, then process the month." />
       <section className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
         <UploadCard title="Employee Details" hint="Employee list (replaces the current roster)." template="roster" upload={(f) => sendKind('roster', f)} onDone={refresh} />
         <UploadCard title="Monthly Check In/Out's" hint="Badge events for one month." template="movement" upload={(f) => sendKind('movement', f)} onDone={refresh} />
@@ -85,16 +99,21 @@ export default function UploadPage({ onChanged, month }: { onChanged: () => void
         />
       </section>
 
-      <HolidayCalendar initialMonth={month} />
-
-      <LeaveCalendar initialMonth={month} />
+      <div className="grid gap-6 lg:grid-cols-2 items-stretch">
+        <HolidayCalendar initialMonth={month} />
+        <LeaveCalendar initialMonth={month} />
+      </div>
 
       <section>
-        <h2 className="font-semibold mb-2">Months</h2>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-semibold">Months</h2>
+          <MonthPicker value={monthFilter} onChange={(ym) => { setMonthFilter(ym); setMonthsPage(0); }}
+            available={allMonths.map((m) => toYm(m.month))} placeholder="Find a month" clearable ariaLabel="Find a month" />
+        </div>
         {months.error && <p className="text-red-700 text-sm">{months.error}</p>}
-        {months.data?.length === 0 && <p className="text-sm text-slate-500">Upload a movement file to get started.</p>}
+        {allMonths.length === 0 && <p className="text-sm text-slate-500">Upload a movement file to get started.</p>}
         <ul className="space-y-2">
-          {months.data?.map((m) => {
+          {pagedMonths.map((m) => {
             const ym = toYm(m.month);
             const r = results[ym];
             return (
@@ -103,7 +122,8 @@ export default function UploadPage({ onChanged, month }: { onChanged: () => void
                 <span className="text-sm text-slate-500">{m.filename}</span>
                 <span className={badge(m.processed)}>{m.processed ? 'Processed' : 'Not processed'}</span>
                 <button
-                  onClick={() => process(ym)}
+                  onClick={() => ask({ title: `${m.processed ? 'Reprocess' : 'Process'} ${ym}?`, confirmLabel: m.processed ? 'Reprocess' : 'Process month',
+                    message: m.processed ? 'Existing results and manual hour adjustments for this month are recalculated.' : 'Attendance results will be calculated from the uploaded files.' }, () => process(ym))}
                   disabled={busyYm !== null}
                   className="btn btn-primary ml-auto"
                 >
@@ -113,17 +133,18 @@ export default function UploadPage({ onChanged, month }: { onChanged: () => void
                   Delete
                 </button>
                 {r && (
-                  <Notice tone="info" className="basis-full" onClose={() => setResults(({ [ym]: _, ...rest }) => rest)}>
-                    {r.visits} visits · {r.issues} issues · {r.wednesdayRows} Wednesday rows
-                  </Notice>
+                  <Toast tone="success" onClose={() => setResults(({ [ym]: _, ...rest }) => rest)}>
+                    {r.visits} visits · {r.issues} issues · {r.wednesdayRows} {day} rows
+                  </Toast>
                 )}
                 {errors[ym] && (
-                  <Notice tone="error" className="basis-full" onClose={() => setErrors(({ [ym]: _, ...rest }) => rest)}>{errors[ym]}</Notice>
+                  <Toast tone="error" onClose={() => setErrors(({ [ym]: _, ...rest }) => rest)}>{errors[ym]}</Toast>
                 )}
               </li>
             );
           })}
         </ul>
+        <Pager always page={monthsPage} pages={monthPages} onPage={setMonthsPage} />
       </section>
 
       <section>
@@ -133,39 +154,40 @@ export default function UploadPage({ onChanged, month }: { onChanged: () => void
           <table className="w-full text-sm">
             <thead className="text-left text-slate-500 bg-slate-50">
               <tr>
-                {['ID', 'Kind', 'File', 'Month', 'Rows', 'Status', 'Uploaded'].map((h) => (
+                {['ID', 'Kind', 'File', 'Month', 'Rows', 'Uploaded by', 'Uploaded'].map((h) => (
                   <th key={h} className="px-3 py-2 font-medium">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {history.slice(historyPage * HISTORY_PAGE, (historyPage + 1) * HISTORY_PAGE).map((u) => (
+              {history.map((u) => (
                 <tr key={u.id} className="border-t border-slate-100">
                   <td className="px-3 py-2">{u.id}</td>
                   <td className="px-3 py-2">{u.kind}</td>
                   <td className="px-3 py-2">{u.filename}</td>
                   <td className="px-3 py-2">{u.month ? toYm(u.month) : '—'}</td>
                   <td className="px-3 py-2">{u.rowCount}</td>
-                  <td className="px-3 py-2">{u.status}</td>
+                  <td className="px-3 py-2">{u.uploadedBy || '—'}</td>
                   <td className="px-3 py-2">{u.uploadedAt.replace('T', ' ').slice(0, 19)}</td>
                 </tr>
               ))}
-              {uploads.data?.length === 0 && (
+              {uploads.data?.total === 0 && (
                 <tr><td colSpan={7} className="px-3 py-4 text-slate-500">No uploads yet.</td></tr>
               )}
             </tbody>
           </table>
         </div>
-        <Pager page={historyPage} pages={historyPages} onPage={setHistoryPage} />
+        <Pager always page={historyPage} pages={historyPages} onPage={setHistoryPage} />
       </section>
       {deleteYm && (
-        <ConfirmModal title={`Delete ${deleteYm} report?`} confirmLabel="Delete report" busy={busyYm === deleteYm}
+        <ConfirmModal title={`Delete ${deleteYm} report?`} confirmLabel="Delete report" busyLabel="Deleting…" busy={busyYm === deleteYm}
           onConfirm={() => remove(deleteYm)} onCancel={() => setDeleteYm(null)}>
           <p>This permanently deletes the uploaded check-in/out file, the processed attendance and audit results for this month.</p>
-          <p className="font-medium text-rose-700">It will also delete all manual overrides for this month (edited hours and Wednesday attendance overrides).</p>
+          <p className="font-medium text-rose-700">It will also delete all manual adjustments for this month (edited hours and {day} attendance adjustments).</p>
           <p>Holidays and leaves are kept. This cannot be undone.</p>
         </ConfirmModal>
       )}
+      {askModal}
     </div>
   );
 }

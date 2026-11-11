@@ -1,4 +1,4 @@
-/** Stores the public holiday dates picked for each month. */
+/** Stores the public holidays: date, the month it falls in, and a description. */
 import { Column, Entity, Index, PrimaryColumn } from "typeorm";
 
 @Entity("public_holidays")
@@ -9,6 +9,9 @@ export class PublicHoliday {
 
   @Column({ type: "date" })
   month!: string;
+
+  @Column({ type: "text", default: "" })
+  description!: string;
 
   @Column({ name: "created_at", type: "timestamptz", default: () => "now()" })
   createdAt!: Date;
