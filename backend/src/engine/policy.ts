@@ -22,7 +22,7 @@ export interface WeekResult {
   /** Office days needed: min(3, 3 - off weekdays), and never more than the working weekdays left in the data. */
   required: number;
   attended: number;
-  /** The Wednesday: attended, missed, or not required (holiday, leave, or outside the data window). */
+  /** The anchor day: attended, missed, or not required (holiday, leave, or outside the data window). */
   anchor: "present" | "absent" | "off";
   anchorOk: boolean;
   status: Tri;
@@ -31,7 +31,7 @@ export interface WeekResult {
 /**
  * One calendar week (Mon-Sun) inside the data window [from, to].
  * `attended` holds the days with a full-length (7h+) visit; `off` holds public holidays and the employee's leave days.
- * The Wednesday anchor is only checked when it lies inside the window and is not an off day.
+ * The anchor day is only checked when it lies inside the window and is not an off day.
  */
 export function evaluateWeek(
   eligibility: string, monday: DateStr, from: DateStr, to: DateStr, attended: ReadonlySet<DateStr>, off: ReadonlySet<DateStr>,
@@ -52,10 +52,9 @@ export function evaluateWeek(
   return { weekStart: monday, required, attended: present, anchor: anchorState, anchorOk, status };
 }
 
-/** Month = the sum of every week's requirement against the office days actually attended. */
+/** Month is compliant only when every evaluated week is compliant; weeks that are not evaluated (NA) are ignored. */
 export function evaluateMonth(eligibility: string, weeks: WeekResult[]): Tri {
   if (eligibility !== "Yes") return "NA";
-  const required = weeks.reduce((s, w) => s + w.required, 0);
-  const attended = weeks.reduce((s, w) => s + w.attended, 0);
-  return attended >= required ? "Yes" : "No";
+  const evaluated = weeks.filter((w) => w.status !== "NA");
+  return evaluated.every((w) => w.status === "Yes") ? "Yes" : "No";
 }

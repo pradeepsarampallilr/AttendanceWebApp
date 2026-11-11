@@ -6,7 +6,7 @@ import type { EmployeeSummary } from '../../lib/attendance';
 import { ComplianceBadge, Empty, Pager, SortTh, hrs, td, th, useSort } from './shared';
 
 type K = 'name' | 'loggedDays' | 'totalHours' | 'avgHours';
-const PAGE = 25;
+const PAGE = 15;
 
 export default function DirectoryTab({ emps, onDetail }: { emps: EmployeeSummary[]; onDetail: (id: string) => void }) {
   const sort = useSort<K>('name');

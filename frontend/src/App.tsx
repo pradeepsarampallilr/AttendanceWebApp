@@ -1,6 +1,6 @@
 /**
  * The main screen: top bar with the signed-in user, month picker and page tabs.
- * Shows the pages the user's role allows (Welcome, Dashboard (upload), Attendance, Wednesday, Audit, Users, Configuration), and has a button to download the month as Excel.
+ * Shows the pages the user's role allows (Welcome, Dashboard (upload), Attendance, Anchor Day, Audit, Users, Configuration), and has a button to download the month as Excel.
  */
 import { NavLink, Navigate, Route, Routes, useLocation, useSearchParams } from 'react-router-dom';
 import { api, downloadFile, toYm } from './api';
@@ -14,10 +14,10 @@ import AccessPage from './pages/AccessPage';
 import AuditPage from './pages/AuditPage';
 import ConfigPage from './pages/ConfigPage';
 import DashboardPage from './pages/DashboardPage';
-import WednesdayPage from './pages/WednesdayPage';
+import AnchorDayPage from './pages/AnchorDayPage';
 import WelcomePage from './pages/WelcomePage';
 import {
-  AttendanceIcon, CalendarIcon, DashboardIcon, DownloadIcon, IndianFlag, InfoIcon, LiveRampMark, LogoutIcon, SettingsIcon, ShieldIcon, UsersIcon,
+  AttendanceIcon, CalendarIcon, DashboardIcon, DownloadIcon, HomeIcon, IndianFlag, LiveRampMark, LogoutIcon, SettingsIcon, ShieldIcon, UsersIcon,
 } from './components/Icons';
 
 const ROLE_LABEL: Record<string, string> = { superadmin: 'Super admin', hr: 'HR', manager: 'Manager', employee: 'Employee' };
@@ -32,7 +32,7 @@ export default function App() {
   const months = useAsync(api.months, []);
   const { pathname } = useLocation();
   // Fetched again on every page change, so a new anchor day shows up right after it is saved.
-  const anchorDay = useAsync(api.rules, [pathname]).data?.anchorDay ?? 'Wednesday';
+  const anchorDay = useAsync(api.rules, [pathname]).data?.anchorDay ?? 'Anchor day';
   const list = months.data ?? [];
   const selected = params.get('month') ?? (list.length ? toYm(list[0].month) : '');
   const search = selected ? `?month=${selected}` : '';
@@ -74,11 +74,11 @@ export default function App() {
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 py-2">
             <nav className="flex flex-wrap items-center gap-1">
-              <NavLink to={`/welcome${search}`} className={linkCls}><InfoIcon /> Welcome</NavLink>
+              <NavLink to={`/welcome${search}`} className={linkCls}><HomeIcon /> Welcome</NavLink>
               {isHr && <NavLink to={`/upload${search}`} className={linkCls}><DashboardIcon /> Dashboard</NavLink>}
               <NavLink to={`/dashboard${search}`} className={linkCls}><AttendanceIcon /> Attendance</NavLink>
               {isManager && <NavLink to={`/team${search}`} className={linkCls}><UsersIcon /> Team</NavLink>}
-              {!isEmployee && !isManager && <NavLink to={`/wednesday${search}`} className={linkCls}><CalendarIcon /> Anchor Day Attendance</NavLink>}
+              {!isEmployee && !isManager && <NavLink to={`/anchor-day${search}`} className={linkCls}><CalendarIcon /> Anchor Day Attendance</NavLink>}
               {isHr && <NavLink to={`/audit${search}`} className={linkCls}><ShieldIcon /> Audit Log</NavLink>}
               {isHr && <NavLink to="/access" className={linkCls}><UsersIcon /> Users</NavLink>}
               {isHr && <NavLink to="/config" className={linkCls}><SettingsIcon /> Configuration</NavLink>}
@@ -105,7 +105,7 @@ export default function App() {
           {isHr && <Route path="/upload" element={<UploadPage onChanged={months.reload} month={selected} />} />}
           <Route path="/dashboard" element={<DashboardPage month={selected} />} />
           {isManager && <Route path="/team" element={<DashboardPage month={selected} team />} />}
-          {!isEmployee && !isManager && <Route path="/wednesday" element={<WednesdayPage month={selected} />} />}
+          {!isEmployee && !isManager && <Route path="/anchor-day" element={<AnchorDayPage month={selected} />} />}
           {isHr && <Route path="/audit" element={<AuditPage month={selected} />} />}
           {isHr && <Route path="/access" element={<AccessPage />} />}
           {isHr && <Route path="/config" element={<ConfigPage />} />}

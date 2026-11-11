@@ -7,6 +7,7 @@ import { useCanEdit } from '../../AuthGate';
 import { BENCHMARK_HOURS, type EmployeeSummary } from '../../lib/attendance';
 import { useConfirm } from '../ConfirmModal';
 import { Badge, Card, Toast, ComplianceBadge, Empty, Pager, dayName, hrs, td, th, time } from './shared';
+import { CalendarIcon, ClockIcon, TrendIcon, BuildingIcon } from '../Icons';
 
 function Chart({ emp }: { emp: EmployeeSummary }) {
   const [hover, setHover] = useState<number | null>(null);
@@ -180,10 +181,10 @@ export default function EmployeeTab({
           <div className="text-sm text-slate-600">{emp.email} · {emp.shift ?? 'No shift'} · {emp.department ?? '—'}</div>
         </div>
         <div className="grid grid-cols-4 gap-3">
-          <Card label="Logged Days" value={emp.loggedDays} />
-          <Card label="Total Daily Hours" value={hrs(emp.totalHours)} />
-          <Card label="Daily Average" value={hrs(emp.avgHours)} />
-          <Card label="Office Sessions" value={emp.sessions} />
+          <Card label="Logged Days" value={emp.loggedDays} icon={<CalendarIcon className="h-5 w-5" />} tone="blue" />
+          <Card label="Total Daily Hours" value={hrs(emp.totalHours)} icon={<ClockIcon className="h-5 w-5" />} tone="amber" />
+          <Card label="Daily Average" value={hrs(emp.avgHours)} icon={<TrendIcon className="h-5 w-5" />} tone="green" />
+          <Card label="Office Sessions" value={emp.sessions} icon={<BuildingIcon className="h-5 w-5" />} />
         </div>
         <div className={solo ? 'grid grid-cols-[minmax(0,1fr)_500px] gap-3 items-stretch' : undefined}>
           <Chart emp={emp} />

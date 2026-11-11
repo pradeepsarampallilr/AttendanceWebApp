@@ -5,7 +5,7 @@ import { And, LessThan, MoreThanOrEqual } from "typeorm";
 import { AppDataSource } from "../db.js";
 import { buildAttendanceDataset } from "../engine/dataset.js";
 import { addDays, daysInMonth, mkDate, settings, weekStart, weekday, type DateStr } from "../engine/core.js";
-import { AttendanceVisit, AuditIssue, Leave, PublicHoliday, SwipeEvent, WednesdayAttendance, WeeklyCompliance } from "../models/index.js";
+import { AttendanceVisit, AuditIssue, Leave, PublicHoliday, SwipeEvent, AnchorDayAttendance, WeeklyCompliance } from "../models/index.js";
 import {
   insertChunked, loadEvents, loadRoster, monthStart, monthUploadIds, nextMonthStart, refreshTransportOptIn, ts,
 } from "./store.js";
@@ -55,16 +55,16 @@ export async function processMonth(ym: string) {
         + unresolvedManagers.join(", ") });
   }
 
-  const wednesdays: DateStr[] = [];
+  const anchorDates: DateStr[] = [];
   for (let d = 1; d <= daysInMonth(year, month); d++) {
     const date = mkDate(year, month, d);
-    if (weekday(date) === settings.anchorWeekday) wednesdays.push(date);
+    if (weekday(date) === settings.anchorWeekday) anchorDates.push(date);
   }
 
   await AppDataSource.transaction(async (m) => {
     await m.delete(AttendanceVisit, { month: ms });
     await m.delete(AuditIssue, { month: ms });
-    await m.delete(WednesdayAttendance, { month: ms });
+    await m.delete(AnchorDayAttendance, { month: ms });
     await m.delete(WeeklyCompliance, { month: ms });
 
     const col = <T>(f: (r: (typeof rows)[number]) => T) => rows.map(f);
@@ -91,12 +91,12 @@ export async function processMonth(ym: string) {
       [ms, issues.map((i) => i.employeeId), issues.map((i) => i.issueType), issues.map((i) => ts(i.at)), issues.map((i) => i.detail)]);
 
     const emps = [...roster.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    const wed: WednesdayAttendance[] = [];
-    for (const e of emps) for (const w of wednesdays) {
-      wed.push(Object.assign(new WednesdayAttendance(), {
-        month: ms, employeeId: e.employeeId, employeeName: e.name, wednesday: w, attended: attendedDates.get(e.employeeId)?.has(w) ?? false }));
+    const anchorRows: AnchorDayAttendance[] = [];
+    for (const e of emps) for (const d of anchorDates) {
+      anchorRows.push(Object.assign(new AnchorDayAttendance(), {
+        month: ms, employeeId: e.employeeId, employeeName: e.name, anchorDate: d, attended: attendedDates.get(e.employeeId)?.has(d) ?? false }));
     }
-    await insertChunked(m, WednesdayAttendance, wed);
+    await insertChunked(m, AnchorDayAttendance, anchorRows);
   });
-  return { month: ms, visits: rows.length, issues: issues.length, wednesdayRows: roster.size * wednesdays.length };
+  return { month: ms, visits: rows.length, issues: issues.length, anchorDayRows: roster.size * anchorDates.length };
 }

@@ -31,7 +31,8 @@ beforeAll(async () => {
   await admin.query(`CREATE DATABASE ${TEST_DB}`);
   await admin.end();
   process.env.DB_NAME = TEST_DB;
-  process.env.OKTA_ISSUER = ""; // these tests exercise the API directly; a developer's .env must not switch auth on (dotenv won't override a set var)
+  process.env.OKTA_ISSUER = "";
+  process.env.ALLOW_INSECURE_DEV_AUTH = "true"; // these tests exercise the API directly; a developer's .env must not switch auth on (dotenv won't override a set var)
 
   const db = await import("../src/db.js");
   ds = db.AppDataSource;
@@ -78,7 +79,7 @@ describe("upload + process matches golden", () => {
     expect((await post(`/months/${ym}/process`)).status).toBe(200);
     // Seed manual data and make sure a reprocess leaves it alone.
     await query("INSERT INTO manual_adjustments (month, employee_id, work_date, action, hours) VALUES ($1, $2, $3, 'add', 1) ON CONFLICT DO NOTHING", [`${ym}-01`, `m${ym}`, `${ym}-02`]);
-    await query("INSERT INTO wednesday_adjustments (month, employee_id, wednesday, attended) VALUES ($1, $2, $3, true) ON CONFLICT DO NOTHING", [`${ym}-01`, `m${ym}`, `${ym}-02`]);
+    await query("INSERT INTO anchor_day_adjustments (month, employee_id, anchor_date, attended) VALUES ($1, $2, $3, true) ON CONFLICT DO NOTHING", [`${ym}-01`, `m${ym}`, `${ym}-02`]);
     expect((await post(`/months/${ym}/process`)).status).toBe(200);
 
     const rows = await get(`/months/${ym}/attendance`);
@@ -99,34 +100,34 @@ describe("upload + process matches golden", () => {
       .map((i: any) => [i.employeeId, i.issueType, i.at, i.detail]).sort();
     expect(pairIssues).toEqual(gold.issues);
 
-    const wed = await get(`/months/${ym}/wednesday`);
+    const wed = await get(`/months/${ym}/anchor-day`);
     const rosterSize = (await query("SELECT count(*)::int AS n FROM roster_employees")).rows[0].n;
     expect(wed.employees.length).toBe(rosterSize);
-    expect(wed.wednesdays.length).toBeGreaterThanOrEqual(4);
+    expect(wed.dates.length).toBeGreaterThanOrEqual(4);
     const yes = new Map<string, Set<string>>();
     for (const r of rows) (yes.get(r.employeeId) ?? yes.set(r.employeeId, new Set()).get(r.employeeId)!).add(r.workDate);
-    for (const e of wed.employees) for (const w of wed.wednesdays) {
+    for (const e of wed.employees) for (const w of wed.dates) {
       expect(e.attended[w]).toBe(yes.get(e.employeeId)?.has(w) ?? false);
     }
 
-    const manual = await query("SELECT (SELECT count(*) FROM manual_adjustments WHERE employee_id = $1)::int AS a, (SELECT count(*) FROM wednesday_adjustments WHERE employee_id = $1)::int AS w", [`m${ym}`]);
+    const manual = await query("SELECT (SELECT count(*) FROM manual_adjustments WHERE employee_id = $1)::int AS a, (SELECT count(*) FROM anchor_day_adjustments WHERE employee_id = $1)::int AS w", [`m${ym}`]);
     expect(manual.rows[0]).toEqual({ a: 1, w: 1 });
   }, 120_000);
 });
 
 describe("manual edits", () => {
   const put = (path: string, body: object) => fetch(`${base}/api${path}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  it("overrides Wednesdays and survives reprocess; revert restores", async () => {
-    const wed = await get("/months/2026-08/wednesday");
-    const e = wed.employees[0], w = wed.wednesdays[0];
+  it("overrides anchor days and survives reprocess; revert restores", async () => {
+    const wed = await get("/months/2026-08/anchor-day");
+    const e = wed.employees[0], w = wed.dates[0];
     const flip = !e.attended[w];
-    expect((await put("/months/2026-08/wednesday", { employeeId: e.employeeId, wednesday: w, attended: flip })).status).toBe(200);
+    expect((await put("/months/2026-08/anchor-day", { employeeId: e.employeeId, date: w, attended: flip })).status).toBe(200);
     await post("/months/2026-08/process");
-    expect((await get("/months/2026-08/wednesday")).employees[0].attended[w]).toBe(flip);
-    expect((await put("/months/2026-08/wednesday", { employeeId: e.employeeId, wednesday: w, attended: null })).status).toBe(200);
-    expect((await get("/months/2026-08/wednesday")).employees[0].attended[w]).toBe(!flip);
-    expect((await put("/months/2026-08/wednesday", { employeeId: "nope", wednesday: w, attended: true })).status).toBe(404);
-    expect((await put("/months/2026-08/wednesday", { employeeId: e.employeeId, wednesday: w, attended: "x" })).status).toBe(400);
+    expect((await get("/months/2026-08/anchor-day")).employees[0].attended[w]).toBe(flip);
+    expect((await put("/months/2026-08/anchor-day", { employeeId: e.employeeId, date: w, attended: null })).status).toBe(200);
+    expect((await get("/months/2026-08/anchor-day")).employees[0].attended[w]).toBe(!flip);
+    expect((await put("/months/2026-08/anchor-day", { employeeId: "nope", date: w, attended: true })).status).toBe(404);
+    expect((await put("/months/2026-08/anchor-day", { employeeId: e.employeeId, date: w, attended: "x" })).status).toBe(400);
   });
 
   it("edits, adds, deletes and reverts daily hours", async () => {
@@ -171,7 +172,7 @@ describe("excel export", () => {
     expect(wb.worksheets.map((w) => w.name)).toEqual(["Attendance", "Wednesday Office Attended"]);
     const rows = await get("/months/2026-08/attendance");
     expect(wb.getWorksheet("Attendance")!.rowCount).toBe(rows.length + 2);
-    const wed = await get("/months/2026-08/wednesday");
+    const wed = await get("/months/2026-08/anchor-day");
     expect(wb.getWorksheet("Wednesday Office Attended")!.rowCount).toBe(wed.employees.length + 1);
     expect((await fetch(`${base}/api/months/2026-01/export.xlsx`)).status).toBe(404);
   });

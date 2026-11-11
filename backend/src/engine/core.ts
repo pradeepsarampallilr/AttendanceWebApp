@@ -13,7 +13,7 @@ export interface Settings {
   compliantMinHours: number;
   /** Office days required in a full week. */
   weeklyOfficeDays: number;
-  /** The anchor day as a weekday() index (Monday = 0, Wednesday = 2). */
+  /** The anchor day as a weekday() index (Monday = 0, Wednesday = 2 by default). */
   anchorWeekday: number;
   /** Minutes around a shift's start (check-in) and end (checkout) when assigning a swipe to a work day. */
   dayAttributionBufferMin: number;
@@ -61,6 +61,8 @@ export const MONTH_NAMES = ["January", "February", "March", "April", "May", "Jun
 /** '05-Aug-2026' */
 export const fmtDate = (date: DateStr) => `${date.slice(8, 10)}-${MONTHS[Number(date.slice(5, 7)) - 1]}-${date.slice(0, 4)}`;
 export const fmtWeekday = (date: DateStr) => DAYS[weekday(date)];
+/** Name of the configured anchor day ("Wednesday", "Thursday", ...). */
+export const anchorDayName = () => DAYS[settings.anchorWeekday];
 
 /** '2026-08-05 15:57:00' */
 export const fmtDateTime = (dt: Date) => `${dateOf(dt)} ${dt.toISOString().slice(11, 19)}`;

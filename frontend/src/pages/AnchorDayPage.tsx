@@ -1,27 +1,28 @@
 /**
- * Users see who came to the office on the anchor day (Wednesday by default), by employee or in a full table, with tiers and totals.
+ * Users see who came to the office on the anchor day, by employee or in a full table, with tiers and totals.
  * They can search, filter and mark days present or absent.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { api, wednesdayApi } from '../api';
+import { api, anchorDayApi } from '../api';
 import { useCanEdit } from '../AuthGate';
 import { useConfirm } from '../components/ConfirmModal';
 import { useAnchorDay } from '../lib/anchorDay';
 import { calendarWeek } from '../lib/dates';
 import { useAsync } from '../useAsync';
 import { Card, Empty, Loading, Toast, PageHeader, Pager, SortTh, Tabs, td, th, useSort } from '../components/dashboard/shared';
+import { CalendarIcon, TargetIcon, ClockIcon, ShieldIcon, UsersIcon, CheckCircleIcon, BuildingIcon, FootprintIcon } from '../components/Icons';
 import {
-  HOURS_PER_DAY, filterWed, stats, summarize, tierOf, tierOptions, workingWednesdays,
-  type TierName, type WedEmployee,
-} from '../lib/wednesday';
+  HOURS_PER_DAY, filterAnchor, stats, summarize, tierOf, tierOptions, workingDates,
+  type TierName, type AnchorEmployee,
+} from '../lib/anchorAttendance';
 
 const TABS = [
   ['directory', 'All Employees Details'],
   ['employee', 'Per Employee Details'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
-const PAGE = 10;
+const PAGE = 15;
 const LIST_PAGE = 10;
 const TIER_CLS: Record<TierName, string> = {
   Perfect: 'bg-emerald-100 text-emerald-800', High: 'bg-sky-100 text-sky-800',
@@ -52,9 +53,9 @@ const cth = `${th} !text-center`;
 const ctd = `${td} !align-middle text-center`;
 const ctdv = `${td} !align-middle`;
 type K = 'id' | 'name' | 'days';
-const keyOf = (e: WedEmployee, k: K) => (k === 'id' ? e.employeeId : k === 'name' ? e.name : e.days);
+const keyOf = (e: AnchorEmployee, k: K) => (k === 'id' ? e.employeeId : k === 'name' ? e.name : e.days);
 
-function DirectoryTable({ emps, dates, allDates, holidays, onDetail, onToggle }: { emps: WedEmployee[]; dates: string[]; allDates: string[]; holidays: Set<string>; onDetail: (id: string) => void; onToggle: Toggle }) {
+function DirectoryTable({ emps, dates, allDates, holidays, onDetail, onToggle }: { emps: AnchorEmployee[]; dates: string[]; allDates: string[]; holidays: Set<string>; onDetail: (id: string) => void; onToggle: Toggle }) {
   const canEdit = useCanEdit();
   const sort = useSort<K>('name');
   const [page, setPage] = useState(0);
@@ -93,7 +94,7 @@ function DirectoryTable({ emps, dates, allDates, holidays, onDetail, onToggle }:
   );
 }
 
-function EmployeeTab({ emps, dates, allDates, holidays, selectedId, onSelect, onToggle }: { emps: WedEmployee[]; dates: string[]; allDates: string[]; holidays: Set<string>; selectedId: string | null; onSelect: (id: string) => void; onToggle: Toggle }) {
+function EmployeeTab({ emps, dates, allDates, holidays, selectedId, onSelect, onToggle }: { emps: AnchorEmployee[]; dates: string[]; allDates: string[]; holidays: Set<string>; selectedId: string | null; onSelect: (id: string) => void; onToggle: Toggle }) {
   const canEdit = useCanEdit();
   const day = useAnchorDay();
   const [page, setPage] = useState(0);
@@ -123,10 +124,10 @@ function EmployeeTab({ emps, dates, allDates, holidays, selectedId, onSelect, on
           <div className="text-sm text-slate-600">{[sel.email, sel.shift ?? 'No shift', sel.department || '—'].join(' · ')}</div>
         </div>
         <div className="grid grid-cols-4 gap-3">
-          <Card label="Days Attended" value={`${sel.days} / ${n} Days`} />
-          <Card label="Compliance Rate" value={pct(sel.rate)} />
-          <Card label="Est. In-Person Hours" value={`~${(sel.days * HOURS_PER_DAY).toFixed(1)} hrs`} />
-          <Card label="Policy Status" value={sel.days === n ? '✓ Compliant' : 'Needs In-Office'} />
+          <Card label="Days Attended" icon={<CalendarIcon className="h-5 w-5" />} tone="blue" value={`${sel.days} / ${n} Days`} />
+          <Card label="Compliance Rate" icon={<TargetIcon className="h-5 w-5" />} tone="green" value={pct(sel.rate)} />
+          <Card label="Est. In-Person Hours" icon={<ClockIcon className="h-5 w-5" />} tone="amber" value={`~${(sel.days * HOURS_PER_DAY).toFixed(1)} hrs`} />
+          <Card label="Policy Status" icon={<ShieldIcon className="h-5 w-5" />} value={sel.days === n ? '✓ Compliant' : 'Needs In-Office'} />
         </div>
         <div className="bg-white border border-slate-200 rounded-lg overflow-x-auto">
           <table className="w-full text-sm">
@@ -150,18 +151,18 @@ function EmployeeTab({ emps, dates, allDates, holidays, selectedId, onSelect, on
   );
 }
 
-export default function WednesdayPage({ month }: { month: string }) {
+export default function AnchorDayPage({ month }: { month: string }) {
   const day = useAnchorDay();
   const [params, setParams] = useSearchParams();
   const months = useAsync(api.months, []);
   const processed = months.data?.find((m) => m.month.slice(0, 7) === month)?.processed;
   const [err, setErr] = useState<string | null>(null);
   const [ask, modal] = useConfirm();
-  const wed = useAsync(() => (month && processed ? wednesdayApi.get(month) : Promise.resolve(null)), [month, processed]);
-  const allDates = wed.data?.wednesdays ?? [];
-  const holidays = useMemo(() => new Set(wed.data?.holidays ?? []), [wed.data]);
-  const dates = useMemo(() => (wed.data ? workingWednesdays(wed.data) : []), [wed.data]);
-  const all = useMemo(() => (wed.data ? summarize(wed.data) : []), [wed.data]);
+  const anchor = useAsync(() => (month && processed ? anchorDayApi.get(month) : Promise.resolve(null)), [month, processed]);
+  const allDates = anchor.data?.dates ?? [];
+  const holidays = useMemo(() => new Set(anchor.data?.holidays ?? []), [anchor.data]);
+  const dates = useMemo(() => (anchor.data ? workingDates(anchor.data) : []), [anchor.data]);
+  const all = useMemo(() => (anchor.data ? summarize(anchor.data) : []), [anchor.data]);
 
   const q = params.get('q') ?? '';
   const tierParam = params.get('tier');
@@ -179,14 +180,14 @@ export default function WednesdayPage({ month }: { month: string }) {
     ask({ title: `Mark ${attended ? 'present' : 'absent'}?`, confirmLabel: attended ? 'Mark present' : 'Mark absent', tone: attended ? 'primary' : 'danger',
       message: `Mark ${name} as ${attended ? 'present' : 'absent'} on ${date}?` }, () => {
       setErr(null);
-      wednesdayApi.set(month, id, date, attended).then(wed.refresh, (e: Error) => setErr(e.message));
+      anchorDayApi.set(month, id, date, attended).then(anchor.refresh, (e: Error) => setErr(e.message));
     });
   };
-  const emps = useMemo(() => filterWed(all, q, tier), [all, q, tier]);
+  const emps = useMemo(() => filterAnchor(all, q, tier), [all, q, tier]);
 
   if (!month) return <Empty text="Nothing Processed yet, upload and process first!" />;
-  if (months.loading || wed.loading) return <Loading />;
-  if (months.error || wed.error) return <p className="text-sm text-red-600">Error: {months.error ?? wed.error}</p>;
+  if (months.loading || anchor.loading) return <Loading />;
+  if (months.error || anchor.error) return <p className="text-sm text-red-600">Error: {months.error ?? anchor.error}</p>;
   if (!processed) return <Empty text={`${month} has not been processed. Process this month first (Upload page).`} />;
   if (!allDates.length || !all.length) return <Empty text={`No ${day} rows for ${month}.`} />;
 
@@ -205,10 +206,10 @@ export default function WednesdayPage({ month }: { month: string }) {
         </select>
       </div>
       <div className="grid grid-cols-4 gap-3">
-        <Card label="Total Staff Tracked" value={s.staff} />
-        <Card label={`Full Attendance (${n}/${n})`} value={s.perfect} sub={s.staff ? pct(s.perfect / s.staff) : '0%'} />
-        <Card label="Average In-Office Days" value={`${s.avgDays.toFixed(1)} / ${n.toFixed(1)}`} sub={`${n ? pct(s.avgDays / n) : '0%'} of working ${day}s`} />
-        <Card label={`Overall ${day} Footfall`} value={s.footfall} sub={`${s.avgTurnout.toFixed(1)} avg per ${day}`} />
+        <Card label="Total Staff Tracked" icon={<UsersIcon className="h-5 w-5" />} value={s.staff} />
+        <Card label={`Full Attendance (${n}/${n})`} icon={<CheckCircleIcon className="h-5 w-5" />} tone="green" value={s.perfect} sub={s.staff ? pct(s.perfect / s.staff) : '0%'} />
+        <Card label="Average In-Office Days" icon={<BuildingIcon className="h-5 w-5" />} tone="blue" value={`${s.avgDays.toFixed(1)} / ${n.toFixed(1)}`} sub={`${n ? pct(s.avgDays / n) : '0%'} of working ${day}s`} />
+        <Card label={`Overall ${day} Footfall`} icon={<FootprintIcon className="h-5 w-5" />} tone="amber" value={s.footfall} sub={`${s.avgTurnout.toFixed(1)} avg per ${day}`} />
       </div>
       {err && <Toast tone="error" onClose={() => setErr(null)}>Update failed: {err}</Toast>}
       <Tabs tabs={TABS} value={tab} onChange={(k) => set({ tab: k })} />

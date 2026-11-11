@@ -37,6 +37,17 @@ export async function readTable(buf: Buffer, filename: string, sheetName?: strin
   return rows;
 }
 
+/** Validates an uploaded .csv / .xlsx and reads it into rows; anything unreadable becomes a ValidationError. */
+export async function readUploadedTable(file: { buffer: Buffer; originalname: string } | undefined): Promise<unknown[][]> {
+  if (!file) throw new ValidationError("Missing file (multipart field 'file')");
+  if (!/\.(csv|xlsx)$/i.test(file.originalname)) throw new ValidationError("File must be .csv or .xlsx");
+  try {
+    return await readTable(file.buffer, file.originalname);
+  } catch (e) {
+    throw new ValidationError(`Could not read ${file.originalname}: ${(e as Error).message}`);
+  }
+}
+
 const stripStar = (v: unknown) => String(v ?? "").trim().replace(/\s*\*$/, "");
 
 export function rosterFromTable(rows: unknown[][]): RosterResult {

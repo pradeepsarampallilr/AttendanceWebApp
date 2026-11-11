@@ -5,6 +5,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { ApiError, api, type Me } from './api';
 import { CALLBACK_PATH, oktaAuth, signOut } from './auth';
+import { IndianFlag, LiveRampMark } from './components/Icons';
 
 type State =
   | { status: 'loading'; message: string }
@@ -34,16 +35,6 @@ function OktaLogo({ className = 'h-5 w-5' }: { className?: string }) {
   );
 }
 
-function AppLogo({ className = 'h-6 w-6' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8"
-      strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <rect x="3.5" y="5" width="17" height="15.5" rx="3" />
-      <path d="M8 3v4M16 3v4M3.5 10h17M9 15l2.2 2.2L15.5 13" />
-    </svg>
-  );
-}
-
 function StatusIcon({ tone, busy }: { tone: Tone; busy: boolean }) {
   const cls = 'h-4 w-4';
   if (busy) {
@@ -67,37 +58,39 @@ function StatusIcon({ tone, busy }: { tone: Tone; busy: boolean }) {
 }
 
 const TONES: Record<Tone, string> = {
-  neutral: 'bg-slate-100 text-slate-600',
+  neutral: 'bg-brand-soft text-brand',
   danger: 'bg-rose-50 text-rose-600',
   warn: 'bg-amber-50 text-amber-600',
 };
 
+/** Same header (LiveRamp logo, flag, product name) and palette as the app, so sign-in screens look like part of it. */
 function Screen({ tone = 'neutral', busy = false, title, children }: {
   tone?: Tone; busy?: boolean; title: string; children: ReactNode;
 }) {
   return (
-    <div className="min-h-screen grid place-items-center bg-gradient-to-br from-slate-50 via-white to-sky-50 px-4">
-      <div className="w-full max-w-sm">
-        <div className="flex items-center justify-center gap-3 mb-6 text-slate-900">
-          <span className="grid h-11 w-11 place-items-center rounded-xl bg-slate-900 text-white shadow-sm">
-            <AppLogo />
-          </span>
-          <span className="text-slate-300" aria-hidden>+</span>
-          <span className="grid h-11 w-11 place-items-center rounded-xl bg-white border border-slate-200 shadow-sm">
-            <OktaLogo className="h-6 w-6" />
-          </span>
+    <div className="min-h-screen flex flex-col bg-slate-50">
+      <header className="bg-white border-b border-slate-200 shadow-sm">
+        <div className="w-[90%] mx-auto flex items-center gap-3 h-14 whitespace-nowrap text-slate-900">
+          <LiveRampMark />
+          <IndianFlag />
+          <span className="hidden md:inline text-slate-300">|</span>
+          <span className="hidden md:inline font-medium text-slate-600">Attendance Management</span>
         </div>
-        <div className="bg-white/90 backdrop-blur border border-slate-200 rounded-2xl p-8 text-center shadow-lg shadow-slate-200/60">
-          <span className={`mx-auto mb-4 grid h-9 w-9 place-items-center rounded-full ${TONES[tone]}`}>
-            <StatusIcon tone={tone} busy={busy} />
-          </span>
-          <h1 className="font-semibold text-lg tracking-tight text-slate-900 mb-1">{title}</h1>
-          {children}
+      </header>
+      <main className="flex-1 grid place-items-center px-4 py-10">
+        <div className="w-full max-w-md">
+          <div className="bg-white border border-slate-200 border-t-4 border-t-accent shadow-sm p-8 text-center">
+            <span className={`mx-auto mb-4 grid h-10 w-10 place-items-center rounded-full ${TONES[tone]}`}>
+              <StatusIcon tone={tone} busy={busy} />
+            </span>
+            <h1 className="font-semibold text-lg tracking-tight text-slate-900 mb-1">{title}</h1>
+            {children}
+          </div>
+          <p className="mt-5 flex items-center justify-center gap-1.5 text-xs text-slate-400">
+            <OktaLogo className="h-3.5 w-3.5" /> Secured by Okta single sign-on
+          </p>
         </div>
-        <p className="mt-5 flex items-center justify-center gap-1.5 text-xs text-slate-400">
-          <OktaLogo className="h-3.5 w-3.5" /> Secured by Okta single sign-on
-        </p>
-      </div>
+      </main>
     </div>
   );
 }
@@ -161,7 +154,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         <Screen tone="danger" title="Access denied">
           <p className="text-sm text-slate-500 mb-4">
             {state.email ? <><b>{state.email}</b> doesn't</> : "Your account doesn't"} have access to the Attendance
-            Management System. It's limited to managers and HR. Ask an administrator to add your email or username.
+            Management System. Ask an administrator to add your email or username.
           </p>
           {state.identifiers.length > 0 && (
             <p className="text-xs text-slate-400 mb-4">We checked: {state.identifiers.join(', ')}</p>

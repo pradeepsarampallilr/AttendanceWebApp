@@ -7,6 +7,7 @@ import { useUser } from '../../AuthGate';
 import type { TeamLine } from '../../api';
 import { BENCHMARK_HOURS, pct, summarizeManagers, type EmployeeSummary, type ManagerSummary } from '../../lib/attendance';
 import { Badge, Card, Empty, SortTh, hrs, td, th, useSort } from './shared';
+import { UsersIcon, ClockIcon, TrendIcon, CheckCircleIcon } from '../Icons';
 
 type K = 'name' | 'loggedDays' | 'totalHours' | 'avgHours' | 'rate' | 'sessions';
 
@@ -26,7 +27,17 @@ export default function ManagerTab({
   const m = managers.find((x) => x.managerId === selected) ?? own ?? shown[0] ?? managers[0];
   const managerIds = new Set(managers.map((x) => x.managerId));
   // Breadcrumb starts at whoever was picked from the list and grows as you drill into managers below them.
-  const trailIds = path[path.length - 1] === m.managerId ? path : [m.managerId];
+  // The signed-in manager's trail comes from the reporting lines, so it survives leaving the tab (View) and coming back.
+  const ancestry = (id: string) => {
+    const ids = [id];
+    while (ids[0] !== own?.managerId && ids.length < 50) {
+      const up = lines.find((l) => l.employeeId === ids[0] && l.depth === 1)?.managerId;
+      if (!up || ids.includes(up)) break;
+      ids.unshift(up);
+    }
+    return ids[0] === own?.managerId ? ids : [id];
+  };
+  const trailIds = lean ? ancestry(m.managerId) : path[path.length - 1] === m.managerId ? path : [m.managerId];
   const trail = trailIds.map((id) => managers.find((x) => x.managerId === id)).filter((x): x is ManagerSummary => !!x);
   const pick = (id: string) => { setPath([id]); onSelect(id); };
   const drill = (id: string) => { setPath([...trailIds, id]); onSelect(id); };
@@ -82,10 +93,10 @@ export default function ManagerTab({
         )}
       </div>
       <div className={`grid gap-3 ${lean ? 'grid-cols-3' : 'grid-cols-4'}`}>
-        <Card label="Team Size (all levels)" value={m.teamSize} />
-        {!lean && <Card label="Total Team Hours" value={hrs(m.totalHours)} />}
-        <Card label="Avg Daily Hours" value={<span className={m.avgHours >= BENCHMARK_HOURS ? 'text-emerald-600' : 'text-amber-600'}>{hrs(m.avgHours)}</span>} />
-        <Card label="≥ 7.0h Compliance" value={`${pct(m.compliantDays, m.evaluatedDays)}%`} sub={`${m.compliantDays} / ${m.evaluatedDays} eligible days`} />
+        <Card label="Team Size (all levels)" value={m.teamSize} icon={<UsersIcon className="h-5 w-5" />} />
+        {!lean && <Card label="Total Team Hours" value={hrs(m.totalHours)} icon={<ClockIcon className="h-5 w-5" />} tone="amber" />}
+        <Card label="Avg Daily Hours" icon={<TrendIcon className="h-5 w-5" />} tone="blue" value={<span className={m.avgHours >= BENCHMARK_HOURS ? 'text-emerald-600' : 'text-amber-600'}>{hrs(m.avgHours)}</span>} />
+        <Card label="≥ 7.0h Compliance" icon={<CheckCircleIcon className="h-5 w-5" />} tone="green" value={`${pct(m.compliantDays, m.evaluatedDays)}%`} sub={`${m.compliantDays} / ${m.evaluatedDays} eligible days`} />
       </div>
       <div className="filters">
         <input className="field !flex-[3]" placeholder="Filter team members" value={tq} onChange={(e) => setTq(e.target.value)} />

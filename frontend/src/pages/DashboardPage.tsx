@@ -15,7 +15,7 @@ import DirectoryTab from '../components/dashboard/DirectoryTab';
 import ManagerTab from '../components/dashboard/ManagerTab';
 import LedgerTab from '../components/dashboard/LedgerTab';
 import WeeklyTab from '../components/dashboard/WeeklyTab';
-import { AttendanceIcon, UsersIcon } from '../components/Icons';
+import { AttendanceIcon, ClockIcon, ListIcon, LoginIcon, UsersIcon } from '../components/Icons';
 
 const TABS = [
   ['directory', 'All Employees Details'],
@@ -149,10 +149,10 @@ export default function DashboardPage({ month, team: teamView = false }: { month
         </select>
       </div>
       <div className="grid grid-cols-4 gap-3">
-        <Card label="Total Employees" value={t.employees} />
-        <Card label="Daily Hours Entries" value={t.dailyEntries} />
-        <Card label="Total Work Hours Logged" value={hrs(t.totalHours)} />
-        <Card label="Check-In Sessions" value={t.sessions} />
+        <Card label="Total Employees" value={t.employees} icon={<UsersIcon className="h-5 w-5" />} />
+        <Card label="Daily Hours Entries" value={t.dailyEntries} icon={<ListIcon className="h-5 w-5" />} tone="blue" />
+        <Card label="Total Work Hours Logged" value={hrs(t.totalHours)} icon={<ClockIcon className="h-5 w-5" />} tone="amber" />
+        <Card label="Check-In Sessions" value={t.sessions} icon={<LoginIcon className="h-5 w-5" />} tone="green" />
       </div>
       <Tabs tabs={TABS} value={tab} onChange={(k) => set({ tab: k })} />
       {tab === 'employee' && <EmployeeTab month={month} onChanged={att.refresh} emps={emps} selectedId={params.get('emp')} onSelect={(id) => set({ emp: id })} />}

@@ -1,38 +1,31 @@
 /** Accepts uploaded roster, movement and transport files, and lists past uploads. */
 import { Router } from "express";
-import multer from "multer";
 import { AppDataSource } from "../db.js";
 import { inferMonthBounds } from "../engine/movement.js";
 import {
   ValidationError, assertMovementHeader, assertRosterHeader, eventsFromMovementTable,
-  fallbackNamesFromTable, readTable, rosterFromTable, transportFromTable,
+  fallbackNamesFromTable, readUploadedTable, rosterFromTable, transportFromTable,
 } from "../io/tables.js";
+import { singleFile } from "../io/upload.js";
 import { buildReportingLines } from "../engine/hierarchy.js";
+import { pageParams } from "../services/paging.js";
 import { logAction } from "../services/audit.js";
 import { requireWrite } from "../services/access.js";
 import { syncRosterUsers } from "../services/users.js";
 import { ReportingLine, RosterEmployee, TransportEmployee, Upload } from "../models/index.js";
 import { insertChunked, insertSwipeEvents, monthStart, refreshTransportOptIn } from "../services/store.js";
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+const upload = singleFile(50 * 1024 * 1024);
 export const uploadsRouter = Router();
 
 uploadsRouter.use(requireWrite);
 
-uploadsRouter.post("/", upload.single("file"), async (req, res) => {
+uploadsRouter.post("/", upload, async (req, res) => {
   const kind = req.body?.kind;
   if (kind !== "roster" && kind !== "movement" && kind !== "transport")
     throw new ValidationError("kind must be 'roster', 'movement' or 'transport'");
-  const file = req.file;
-  if (!file) throw new ValidationError("Missing file (multipart field 'file')");
-  if (!/\.(csv|xlsx)$/i.test(file.originalname)) throw new ValidationError("File must be .csv or .xlsx");
-
-  let table: unknown[][];
-  try {
-    table = await readTable(file.buffer, file.originalname);
-  } catch (e) {
-    throw new ValidationError(`Could not read ${file.originalname}: ${(e as Error).message}`);
-  }
+  const file = req.file!; // readUploadedTable rejects a missing file
+  const table = await readUploadedTable(file);
 
   const uploadedBy = req.userEmail ?? "";
   const result = await AppDataSource.transaction(async (m) => {
@@ -80,8 +73,7 @@ uploadsRouter.post("/", upload.single("file"), async (req, res) => {
 
 /** Upload history, newest first, one page at a time: ?page=1&pageSize=10. */
 uploadsRouter.get("/", async (req, res) => {
-  const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 10));
-  const page = Math.max(1, Number(req.query.page) || 1);
+  const { page, pageSize } = pageParams(req.query, 10);
   const [items, total] = await AppDataSource.getRepository(Upload).findAndCount({
     order: { id: "DESC" }, skip: (page - 1) * pageSize, take: pageSize });
   res.json({ items, total, page, pageSize });

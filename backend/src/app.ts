@@ -49,7 +49,7 @@ export function createApp() {
   // Browsers on other origins are refused unless listed in CORS_ORIGIN (comma separated). The built site is same-origin.
   const origins = (process.env.CORS_ORIGIN ?? "").split(",").map((o) => o.trim()).filter(Boolean);
   app.use(cors({ origin: origins.length ? origins : false }));
-  app.use("/api", rateLimit(600));
+  app.use("/api", rateLimit(Number(process.env.RATE_LIMIT_PER_MIN) || 600));
 
   app.get("/api/health", (_req, res) => void res.json({ ok: true }));
   app.use("/api", oktaAuth());
@@ -67,7 +67,6 @@ export function createApp() {
   app.use("/api/leaves", leavesRouter);
   app.use("/api/admin", adminRouter);
 
-  
   const dist = process.env.CLIENT_DIST && path.resolve(process.env.CLIENT_DIST);
   if (dist && existsSync(dist)) {
     app.use(express.static(dist));
@@ -78,6 +77,11 @@ export function createApp() {
     if (err instanceof ValidationError || err instanceof RangeError) return void res.status(400).json({ error: err.message });
     if (err instanceof NotFoundError) return void res.status(404).json({ error: err.message });
     if (err?.name === "MulterError") return void res.status(400).json({ error: err.message });
+    // Body-parser failures (bad JSON, body too large) carry their own 4xx status.
+    const status = err?.status ?? err?.statusCode;
+    if (err?.expose && status >= 400 && status < 500) return void res.status(status).json({ error: status === 413 ? "Request body is too large" : "Malformed request" });
+    // Postgres "data exception" (class 22): the client sent a value the column cannot hold (NUL byte, text for a number, ...).
+    if (String(err?.driverError?.code ?? "").startsWith("22")) return void res.status(400).json({ error: "Invalid value in request" });
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
   };

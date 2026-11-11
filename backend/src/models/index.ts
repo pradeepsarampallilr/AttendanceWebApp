@@ -10,8 +10,8 @@ import { RosterEmployee } from "./RosterEmployee.js";
 import { SwipeEvent } from "./SwipeEvent.js";
 import { TransportEmployee } from "./TransportEmployee.js";
 import { Upload } from "./Upload.js";
-import { WednesdayAttendance } from "./WednesdayAttendance.js";
-import { WednesdayAdjustment } from "./WednesdayAdjustment.js";
+import { AnchorDayAttendance } from "./AnchorDayAttendance.js";
+import { AnchorDayAdjustment } from "./AnchorDayAdjustment.js";
 import { ReportingLine } from "./ReportingLine.js";
 import { AuditLog } from "./AuditLog.js";
 import { WeeklyCompliance } from "./WeeklyCompliance.js";
@@ -27,13 +27,13 @@ export * from "./RosterEmployee.js";
 export * from "./SwipeEvent.js";
 export * from "./TransportEmployee.js";
 export * from "./Upload.js";
-export * from "./WednesdayAttendance.js";
-export * from "./WednesdayAdjustment.js";
+export * from "./AnchorDayAttendance.js";
+export * from "./AnchorDayAdjustment.js";
 export * from "./ReportingLine.js";
 export * from "./AuditLog.js";
 export * from "./WeeklyCompliance.js";
 
 export const entities = [
-  Upload, RosterEmployee, SwipeEvent, AttendanceVisit, WednesdayAttendance, AuditIssue,
-  ManualAdjustment, WednesdayAdjustment, PublicHoliday, TransportEmployee, Leave, AppUser, ReportingLine, AuditLog, WeeklyCompliance, AppSetting,
+  Upload, RosterEmployee, SwipeEvent, AttendanceVisit, AnchorDayAttendance, AuditIssue,
+  ManualAdjustment, AnchorDayAdjustment, PublicHoliday, TransportEmployee, Leave, AppUser, ReportingLine, AuditLog, WeeklyCompliance, AppSetting,
 ];

@@ -30,7 +30,7 @@ export class WeeklyCompliance {
   @Column({ type: "int" })
   attended!: number;
 
-  /** The Wednesday: present, absent, or off (holiday / leave / outside the data). */
+  /** The anchor day: present, absent, or off (holiday / leave / outside the data). */
   @Column({ type: "text" })
   anchor!: "present" | "absent" | "off";
 

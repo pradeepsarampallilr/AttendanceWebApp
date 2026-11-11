@@ -6,7 +6,7 @@ import { useAsync } from '../useAsync';
 import { longDateDay } from '../lib/dates';
 import { useUser } from '../AuthGate';
 import { Loading, PageHeader } from '../components/dashboard/shared';
-import { InfoIcon } from '../components/Icons';
+import { HomeIcon } from '../components/Icons';
 
 const greeting = () => {
   const h = new Date().getHours();
@@ -25,8 +25,8 @@ export default function WelcomePage({ month }: { month: string }) {
   const card = 'bg-white border border-slate-200 rounded-lg p-4';
   return (
     <div className="space-y-4">
-      <PageHeader icon={<InfoIcon className="h-5 w-5" />} title="Welcome!"
-        sub={`${greeting()}${firstName(email) ? `, ${firstName(email)}` : ''}. Here is how every compliance number on this site is worked out.`}
+      <PageHeader icon={<HomeIcon className="h-5 w-5" />} title="Welcome!"
+        sub={`${greeting()}${firstName(email) ? `, ${firstName(email)}` : ''}. Here is how every compliance on this site is worked out.`}
         aside={<span className="rounded-full bg-brand px-3 py-1 text-xs font-medium text-white">Rules v{r.version}</span>} />
 
       <section className={card}>

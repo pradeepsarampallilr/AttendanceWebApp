@@ -15,6 +15,7 @@ beforeAll(async () => {
   await admin.end();
   process.env.DB_NAME = TEST_DB;
   process.env.OKTA_ISSUER = "";
+  process.env.ALLOW_INSECURE_DEV_AUTH = "true";
   const db = await import("../src/db.js");
   ds = db.AppDataSource;
   await db.migrate();

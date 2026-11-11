@@ -1,17 +1,22 @@
 /**
  * Weekly compliance by team: for every calendar week, the office days attended against the days required (3, fewer
- * with holidays or leave) and whether the Wednesday anchor was met. Opens on the Engineering team when it exists.
+ * with holidays or leave) and whether the anchor day was met. Opens on the Engineering team when it exists.
  */
 import { useEffect, useMemo, useState } from 'react';
 import type { Tri, WeeklyRow } from '../../api';
 import { useAnchorDay } from '../../lib/anchorDay';
 import { longDate } from '../../lib/dates';
 import { Card, Empty, Pager, th, td } from './shared';
+import { UsersIcon, CheckCircleIcon, CalendarIcon, BuildingIcon } from '../Icons';
 
 const PAGE = 10;
 const EMP_W = 220;
 const WEEK_W = 120;
-const ANCHOR = { present: ['✓ Wed', 'text-emerald-700'], absent: ['✗ Wed', 'text-rose-700'], off: ['Wed off', 'text-slate-400'] } as const;
+/** Short labels with the configured anchor day's 3-letter name (Wed, Thu, ...). */
+const anchorLabels = (day: string) => {
+  const d = day.slice(0, 3);
+  return { present: [`✓ ${d}`, 'text-emerald-700'], absent: [`✗ ${d}`, 'text-rose-700'], off: [`${d} off`, 'text-slate-400'] } as const;
+};
 const STATUS_CLS: Record<Tri, string> = { Yes: 'bg-emerald-50 border-emerald-200', No: 'bg-rose-50 border-rose-200', NA: 'bg-slate-50 border-slate-200' };
 
 export default function WeeklyTab({ weekly, solo = false }: { weekly: WeeklyRow[]; solo?: boolean }) {
@@ -75,7 +80,7 @@ export default function WeeklyTab({ weekly, solo = false }: { weekly: WeeklyRow[
   }
 
   const evaluated = scoped.filter((w) => w.status !== 'NA');
-  const wedWeeks = evaluated.filter((w) => w.anchor !== 'off');
+  const anchorWeeks = evaluated.filter((w) => w.anchor !== 'off');
   const rate = (n: number, d: number) => (d ? `${Math.round((n / d) * 100)}%` : '—');
   const pages = Math.ceil(people.length / PAGE);
 
@@ -95,10 +100,10 @@ export default function WeeklyTab({ weekly, solo = false }: { weekly: WeeklyRow[
         <span className="text-xs text-slate-500">Rule: {day} in the office + up to 3 office days a week (7h+ each); holidays and leave lower the 3.</span>
       </div>}
       {!solo && <div className="grid grid-cols-4 gap-3">
-        <Card label="People evaluated" value={everyone.filter((p) => [...p.byWeek.values()].some((w) => w.status !== 'NA')).length} />
-        <Card label="Weeks compliant" value={rate(evaluated.filter((w) => w.status === 'Yes').length, evaluated.length)} sub={`${evaluated.filter((w) => w.status === 'Yes').length} of ${evaluated.length} person-weeks`} />
-        <Card label={`${day} met`} value={rate(wedWeeks.filter((w) => w.anchor === 'present').length, wedWeeks.length)} sub={`weeks where ${day} was required`} />
-        <Card label="Office days met" value={rate(evaluated.filter((w) => w.attended >= w.required).length, evaluated.length)} sub="weeks with enough 7h days" />
+        <Card label="People evaluated" icon={<UsersIcon className="h-5 w-5" />} value={everyone.filter((p) => [...p.byWeek.values()].some((w) => w.status !== 'NA')).length} />
+        <Card label="Weeks compliant" icon={<CheckCircleIcon className="h-5 w-5" />} tone="green" value={rate(evaluated.filter((w) => w.status === 'Yes').length, evaluated.length)} sub={`${evaluated.filter((w) => w.status === 'Yes').length} of ${evaluated.length} person-weeks`} />
+        <Card label={`${day} met`} icon={<CalendarIcon className="h-5 w-5" />} tone="amber" value={rate(anchorWeeks.filter((w) => w.anchor === 'present').length, anchorWeeks.length)} sub={`weeks where ${day} was required`} />
+        <Card label="Office days met" icon={<BuildingIcon className="h-5 w-5" />} tone="blue" value={rate(evaluated.filter((w) => w.attended >= w.required).length, evaluated.length)} sub="weeks with enough 7h days" />
       </div>}
       <div className="bg-white border border-slate-200 rounded-lg overflow-x-auto">
         <table className="text-sm border-collapse table-fixed" style={{ width: EMP_W + weeks.length * WEEK_W, minWidth: '100%' }}>
@@ -119,7 +124,7 @@ export default function WeeklyTab({ weekly, solo = false }: { weekly: WeeklyRow[
                 {weeks.map(([wk]) => {
                   const w = p.byWeek.get(wk);
                   if (!w) return <td key={wk} className={`${td} align-middle text-center border-l border-slate-200 text-slate-400`}>—</td>;
-                  const [anchorText, anchorCls] = ANCHOR[w.anchor];
+                  const [anchorText, anchorCls] = anchorLabels(day)[w.anchor];
                   return (
                     <td key={wk} className={`${td} align-middle text-center border-l border-slate-200`}>
                       {w.status === 'NA' ? <span className="text-xs text-slate-400">N/A</span> : (

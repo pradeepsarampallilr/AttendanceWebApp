@@ -217,4 +217,3 @@ export function buildLedger(emps: EmployeeSummary[]): LedgerEmployee[] {
 }
 
 export const pct = (num: number, den: number) => (den ? Math.round((num / den) * 1000) / 10 : 0);
-export const hoursTone = (h: number) => (h >= BENCHMARK_HOURS ? 'green' : 'amber');

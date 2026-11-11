@@ -76,14 +76,23 @@ export function ComplianceBadge({ emp }: { emp: { monthCompliant: Tri; weekStatu
   return <span className={`px-1.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${cls}`}>{emp.weekStatus ? 'Week: ' : ''}{label}</span>;
 }
 
-export function Card({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
+const CARD_TONE = {
+  brand: 'bg-brand-soft text-brand',
+  green: 'bg-emerald-100 text-emerald-700',
+  amber: 'bg-amber-100 text-amber-700',
+  blue: 'bg-sky-100 text-sky-700',
+  slate: 'bg-slate-100 text-slate-600',
+};
+
+export function Card({ label, value, sub, icon, tone = 'brand' }: { label: string; value: React.ReactNode; sub?: string; icon?: React.ReactNode; tone?: keyof typeof CARD_TONE }) {
   return (
-    <div className="bg-white border border-slate-200 rounded-lg p-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-xs text-slate-500">{label}</div>
-        <div className="text-xl font-semibold text-right">{value}</div>
+    <div className="bg-white border border-slate-200 rounded-lg p-3 flex items-center gap-2.5 shadow-sm">
+      {icon && <span className={`shrink-0 rounded-full p-2 ${CARD_TONE[tone]}`}>{icon}</span>}
+      <div className="min-w-0 flex-1">
+        <div className="text-xs font-medium text-slate-500">{label}</div>
+        <div className="text-xl font-semibold leading-tight">{value}</div>
+        {sub && <div className="text-xs text-slate-500">{sub}</div>}
       </div>
-      {sub && <div className="text-xs text-slate-500 text-right">{sub}</div>}
     </div>
   );
 }
@@ -102,7 +111,7 @@ export function PageHeader({ title, badge, sub, icon, aside }: { title: string; 
   );
 }
 
-/** Tab strip shared by the Dashboard and Wednesday pages. */
+/** Tab strip shared by the Dashboard and Anchor Day pages. */
 export function Tabs<K extends string>({ tabs, value, onChange }: { tabs: readonly (readonly [K, string])[]; value: K; onChange: (k: K) => void }) {
   return (
     <nav className="tabs">

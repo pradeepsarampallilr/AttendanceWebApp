@@ -134,7 +134,7 @@ export default function UploadPage({ onChanged, month }: { onChanged: () => void
                 </button>
                 {r && (
                   <Toast tone="success" onClose={() => setResults(({ [ym]: _, ...rest }) => rest)}>
-                    {r.visits} visits · {r.issues} issues · {r.wednesdayRows} {day} rows
+                    {r.visits} visits · {r.issues} issues · {r.anchorDayRows} {day} rows
                   </Toast>
                 )}
                 {errors[ym] && (

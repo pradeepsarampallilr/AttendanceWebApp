@@ -3,9 +3,6 @@ import logo from '../assets/liveramp-logo.svg';
 type P = { className?: string };
 const base = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true } as const;
 
-export const UploadIcon = ({ className = 'h-4 w-4' }: P) => (
-  <svg {...base} className={className}><path d="M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" /></svg>
-);
 export const DashboardIcon = ({ className = 'h-4 w-4' }: P) => (
   <svg {...base} className={className}><rect x="3" y="3" width="7" height="9" rx="1.5" /><rect x="14" y="3" width="7" height="5" rx="1.5" /><rect x="14" y="12" width="7" height="9" rx="1.5" /><rect x="3" y="16" width="7" height="5" rx="1.5" /></svg>
 );
@@ -24,14 +21,39 @@ export const SettingsIcon = ({ className = 'h-4 w-4' }: P) => (
 export const UsersIcon = ({ className = 'h-4 w-4' }: P) => (
   <svg {...base} className={className}><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c.5-3.5 3-5.5 6.5-5.5s6 2 6.5 5.5M16 4.8a3.5 3.5 0 0 1 0 6.4M18 14.8c2 .7 3.2 2.4 3.5 5.2" /></svg>
 );
-export const InfoIcon = ({ className = 'h-4 w-4' }: P) => (
-  <svg {...base} className={className}><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 7.8v.1" /></svg>
+export const HomeIcon = ({ className = 'h-4 w-4' }: P) => (
+  <svg {...base} className={className}><path d="M3 11l9-8 9 8" /><path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10" /></svg>
 );
 export const DownloadIcon = ({ className = 'h-4 w-4' }: P) => (
   <svg {...base} className={className}><path d="M12 4v12M7 11l5 5 5-5M4 20h16" /></svg>
 );
 export const LogoutIcon = ({ className = 'h-4 w-4' }: P) => (
   <svg {...base} className={className}><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 8l-4 4 4 4M6 12h10" /></svg>
+);
+
+export const ClockIcon = ({ className = 'h-4 w-4' }: P) => (
+  <svg {...base} className={className}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+);
+export const CheckCircleIcon = ({ className = 'h-4 w-4' }: P) => (
+  <svg {...base} className={className}><circle cx="12" cy="12" r="9" /><path d="m8 12.5 2.8 2.8L16 9.5" /></svg>
+);
+export const BuildingIcon = ({ className = 'h-4 w-4' }: P) => (
+  <svg {...base} className={className}><path d="M5 21V4a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v17M15 9h3a1 1 0 0 1 1 1v11M3 21h18M9 7h2M9 11h2M9 15h2" /></svg>
+);
+export const TrendIcon = ({ className = 'h-4 w-4' }: P) => (
+  <svg {...base} className={className}><path d="M3 17l6-6 4 4 8-8M15 7h6v6" /></svg>
+);
+export const ListIcon = ({ className = 'h-4 w-4' }: P) => (
+  <svg {...base} className={className}><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" /></svg>
+);
+export const TargetIcon = ({ className = 'h-4 w-4' }: P) => (
+  <svg {...base} className={className}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" /></svg>
+);
+export const LoginIcon = ({ className = 'h-4 w-4' }: P) => (
+  <svg {...base} className={className}><path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3M14 8l4 4-4 4M18 12H8" /></svg>
+);
+export const FootprintIcon = ({ className = 'h-4 w-4' }: P) => (
+  <svg {...base} className={className}><circle cx="12" cy="5" r="2" /><path d="M12 8v6l-3 6M12 14l3 6M8 11l4-3 4 3" /></svg>
 );
 
 export function IndianFlag({ className = 'h-4 w-6' }: P) {

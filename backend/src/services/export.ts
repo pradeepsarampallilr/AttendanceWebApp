@@ -2,7 +2,7 @@
  * Builds the Excel download of the attendance results.
  */
 import ExcelJS from "exceljs";
-import { MONTH_NAMES, addDays, fmtDate, fmtWeekday, settings } from "../engine/core.js";
+import { MONTH_NAMES, anchorDayName, fmtDate, fmtWeekday } from "../engine/core.js";
 import type { ApiRow } from "./adjustments.js";
 
 const HEADERS = [
@@ -25,7 +25,7 @@ const style = (ws: ExcelJS.Worksheet, row: number) => {
 export async function buildWorkbook(
   ym: string,
   rows: (ApiRow & Record<string, any>)[],
-  wed: { wednesdays: string[]; holidays: string[]; employees: { employeeId: string; name: string; attended: Record<string, boolean> }[] },
+  anchor: { dates: string[]; holidays: string[]; employees: { employeeId: string; name: string; attended: Record<string, boolean> }[] },
 ) {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Attendance");
@@ -43,17 +43,17 @@ export async function buildWorkbook(
   ws.views = [{ state: "frozen", ySplit: 2 }];
   ws.columns.forEach((c) => { c.width = 18; });
 
-  const ww = wb.addWorksheet(`${fmtWeekday(addDays("2026-11-02", settings.anchorWeekday))} Office Attended`);
-  const holidays = new Set(wed.holidays);
-  ww.addRow(["Employee id", "Employee Name", ...wed.wednesdays.map((d) => fmtDate(d) + (holidays.has(d) ? " (Holiday)" : "")), "Days Attended"]);
+  const ww = wb.addWorksheet(`${anchorDayName()} Office Attended`);
+  const holidays = new Set(anchor.holidays);
+  ww.addRow(["Employee id", "Employee Name", ...anchor.dates.map((d) => fmtDate(d) + (holidays.has(d) ? " (Holiday)" : "")), "Days Attended"]);
   style(ww, 1);
-  for (const e of wed.employees) {
-    const cells = wed.wednesdays.map((d) => (holidays.has(d) ? "Holiday" : e.attended[d] === true ? "Yes" : "No"));
+  for (const e of anchor.employees) {
+    const cells = anchor.dates.map((d) => (holidays.has(d) ? "Holiday" : e.attended[d] === true ? "Yes" : "No"));
     ww.addRow([e.employeeId, e.name, ...cells, cells.filter((c) => c === "Yes").length]);
   }
-  wed.wednesdays.forEach((d, i) => {
+  anchor.dates.forEach((d, i) => {
     if (!holidays.has(d)) return;
-    for (let r = 1; r <= wed.employees.length + 1; r++) {
+    for (let r = 1; r <= anchor.employees.length + 1; r++) {
       ww.getCell(r, i + 3).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } };
       if (r > 1) ww.getCell(r, i + 3).font = { color: { argb: "FF7F7F7F" } };
     }

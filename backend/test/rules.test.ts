@@ -5,7 +5,6 @@ import { buildAttendanceDataset } from "../src/engine/dataset.js";
 import { evaluateCompliance, evaluateEligibility, evaluateMonth, evaluateWeek } from "../src/engine/policy.js";
 import type { EventsByEmployee, RosterEntry } from "../src/engine/types.js";
 
-const none = new Set<string>();
 // Week of Mon 2026-08-03 .. Fri 2026-08-07 (Wed = 5th)
 const week = (attended: string[], off: string[] = [], from = "2026-08-03", to = "2026-08-30") =>
   evaluateWeek("Yes", "2026-08-03", from, to, new Set(attended), new Set(off));
@@ -52,11 +51,11 @@ describe("eligibility and month", () => {
     expect(evaluateCompliance("Yes", 6.99)).toBe("No");
     expect(evaluateCompliance("Yes", 7)).toBe("Yes");
   });
-  it("sums the weekly requirements", () => {
-    const w = (required: number, attended: number) => ({ weekStart: "", required, attended, anchor: "present" as const, anchorOk: true, status: "Yes" as const });
-    expect(evaluateMonth("Yes", [w(3, 3), w(2, 2), w(3, 3)])).toBe("Yes");
-    expect(evaluateMonth("Yes", [w(3, 3), w(3, 2)])).toBe("No");
-    expect(evaluateMonth("NA", [w(3, 0)])).toBe("NA");
+  it("is compliant only when every evaluated week is compliant", () => {
+    const w = (status: "Yes" | "No" | "NA") => ({ weekStart: "", required: 3, attended: 3, anchor: "present" as const, anchorOk: true, status });
+    expect(evaluateMonth("Yes", [w("Yes"), w("Yes"), w("NA")])).toBe("Yes");
+    expect(evaluateMonth("Yes", [w("Yes"), w("No"), w("Yes")])).toBe("No");
+    expect(evaluateMonth("NA", [w("Yes")])).toBe("NA");
   });
 });
 

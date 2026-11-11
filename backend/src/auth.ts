@@ -19,8 +19,10 @@ declare module "express-serve-static-core" {
 export function oktaAuth(): RequestHandler {
   const issuer = process.env.OKTA_ISSUER?.replace(/\/$/, "");
   if (!issuer) {
-    if (process.env.NODE_ENV === "production") throw new Error("OKTA_ISSUER must be set in production: refusing to start with authentication disabled.");
-    console.warn("Okta auth DISABLED: OKTA_ISSUER is not set; every request acts as a local superadmin (development only).");
+    // Fail closed: running without Okta needs an explicit opt-in, and is never allowed in production.
+    if (process.env.NODE_ENV === "production" || process.env.ALLOW_INSECURE_DEV_AUTH !== "true")
+      throw new Error("OKTA_ISSUER must be set: refusing to start with authentication disabled (local development can opt in with ALLOW_INSECURE_DEV_AUTH=true).");
+    console.warn("Okta auth DISABLED by ALLOW_INSECURE_DEV_AUTH: every request acts as a local superadmin (development only).");
     return (req, _res, next) => {
       req.userEmail = "dev@local";
       req.userRole = "superadmin";
@@ -28,8 +30,11 @@ export function oktaAuth(): RequestHandler {
     };
   }
   const orgServer = !new URL(issuer).pathname.includes("/oauth2");
-  const audience = orgServer ? process.env.OKTA_CLIENT_ID : (process.env.OKTA_AUDIENCE ?? "api://default");
-  if (!audience) throw new Error("OKTA_ISSUER is the Okta org server, so OKTA_CLIENT_ID (the SPA's client id) is required: it is the ID token's audience.");
+  // The SPA's client id (same value as the frontend's VITE_OKTA_CLIENT_ID). It is the ID token's audience on the org server,
+  // and on a custom server it must match the access token's `cid`, so tokens issued to other apps in the org are refused.
+  const clientId = process.env.OKTA_CLIENT_ID?.trim();
+  if (!clientId) throw new Error("OKTA_CLIENT_ID (the SPA's client id, same as the frontend's VITE_OKTA_CLIENT_ID) is required.");
+  const audience = orgServer ? clientId : (process.env.OKTA_AUDIENCE ?? "api://default");
   console.log(`Okta auth ENABLED: ${orgServer ? "org server, verifying ID tokens" : "verifying access tokens"} (issuer=${issuer}, audience=${audience})`);
   const identityClaim = process.env.OKTA_IDENTITY_CLAIM?.trim();
   if (identityClaim && !["preferred_username", "email", "sub"].includes(identityClaim)) {
@@ -50,7 +55,13 @@ export function oktaAuth(): RequestHandler {
       return void res.status(401).json({ error: "Invalid or expired token", reason });
     }
 
-    const norm = (v: unknown) => (typeof v === "string" ? v.trim().toLowerCase() : "");
+    if (!orgServer && payload.cid !== clientId) {
+      console.warn(`Okta token rejected: issued to another application (cid=${String(payload.cid)}, expected ${clientId})`);
+      return void res.status(401).json({ error: "Invalid or expired token", reason: "wrong_client" });
+    }
+
+    // Identity claims must be short, printable strings (a NUL byte or a huge value never reaches the database).
+    const norm = (v: unknown) => (typeof v === "string" && v.length <= 320 && !/[\u0000-\u001f\u007f]/.test(v.trim()) ? v.trim().toLowerCase() : "");
     const raw = identityClaim
       ? [payload[identityClaim]]
       : [payload.preferred_username, payload.email, typeof payload.sub === "string" && payload.sub.includes("@") ? payload.sub : undefined];

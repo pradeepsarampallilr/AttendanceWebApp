@@ -6,7 +6,7 @@ import type { EntityManager } from "typeorm";
 import { AppUser, type AppRole } from "../models/index.js";
 
 export const normEmail = (e: string) => e.trim().toLowerCase();
-export const isEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+export const isEmail = (e: string) => e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 
 /**
  * Gives every roster employee with an email a login: 'manager' if anyone reports to them, else 'employee'.

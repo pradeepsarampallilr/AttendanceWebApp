@@ -5,6 +5,7 @@ import type { EntityManager, EntityTarget, ObjectLiteral } from "typeorm";
 import type { DateStr } from "../engine/core.js";
 import type { EventsByEmployee, RosterEntry } from "../engine/types.js";
 import { AttendanceVisit, RosterEmployee, SwipeEvent } from "../models/index.js";
+import { cleanText } from "./text.js";
 
 export const ts = (d: Date) => d.toISOString().slice(0, 19);
 export const parseTs = (s: string) => new Date(s.slice(0, 19) + "Z");
@@ -14,6 +15,9 @@ export const nextMonthStart = (ms: DateStr): DateStr => {
   const [y, m] = ms.split("-").map(Number);
   return m === 12 ? `${y + 1}-01-01` : monthStart(y, m + 1);
 };
+
+/** A search term as a safe ILIKE fragment: text only, no control characters, at most 100 long, with % _ and \\ escaped. */
+export const escapeLike = (q: unknown) => cleanText(q, 100).replace(/[\\%_]/g, "\\$&");
 
 /** Multi-row INSERT in chunks (Postgres caps a statement at 65535 bind parameters). */
 export async function insertChunked<T extends ObjectLiteral>(m: EntityManager, target: EntityTarget<T>, rows: T[], size = 1000) {

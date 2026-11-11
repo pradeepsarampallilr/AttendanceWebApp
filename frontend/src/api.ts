@@ -49,7 +49,7 @@ export interface ProcessResult {
   month: string;
   visits: number;
   issues: number;
-  wednesdayRows: number;
+  anchorDayRows: number;
 }
 
 export interface LeaveUploadResult {
@@ -268,7 +268,7 @@ export const attendanceApi = {
     request(`/api/months/${ym}/hours/${encodeURIComponent(employeeId)}/${workDate}`, { method: 'DELETE' }),
 };
 
-export interface WednesdayEmployee {
+export interface AnchorDayEmployee {
   employeeId: string;
   name: string;
   email: string;
@@ -276,14 +276,14 @@ export interface WednesdayEmployee {
   shift: string | null;
   attended: Record<string, boolean>;
 }
-export interface WednesdayData {
-  wednesdays: string[];
+export interface AnchorDayData {
+  dates: string[];
   holidays: string[];
-  employees: WednesdayEmployee[];
+  employees: AnchorDayEmployee[];
 }
 
-export const wednesdayApi = {
-  get: (ym: string) => request<WednesdayData>(`/api/months/${ym}/wednesday`),
-  set: (ym: string, employeeId: string, wednesday: string, attended: boolean | null) =>
-    request(`/api/months/${ym}/wednesday`, json('PUT', { employeeId, wednesday, attended })),
+export const anchorDayApi = {
+  get: (ym: string) => request<AnchorDayData>(`/api/months/${ym}/anchor-day`),
+  set: (ym: string, employeeId: string, date: string, attended: boolean | null) =>
+    request(`/api/months/${ym}/anchor-day`, json('PUT', { employeeId, date, attended })),
 };

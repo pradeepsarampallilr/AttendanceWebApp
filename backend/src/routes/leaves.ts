@@ -1,29 +1,21 @@
 /** Lets users upload a leave file and search employees for the leave calendar. */
 import { Router } from "express";
-import multer from "multer";
 import { ILike, Like } from "typeorm";
 import { AppDataSource } from "../db.js";
-import { ValidationError, leavesFromTable, readTable } from "../io/tables.js";
+import { ValidationError, leavesFromTable, readUploadedTable } from "../io/tables.js";
+import { singleFile } from "../io/upload.js";
 import { Leave, RosterEmployee, Upload } from "../models/index.js";
 import { requireWrite } from "../services/access.js";
 import { logAction } from "../services/audit.js";
-import { insertChunked } from "../services/store.js";
+import { escapeLike } from "../services/store.js";
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const upload = singleFile(10 * 1024 * 1024);
 export const leavesRouter = Router();
 leavesRouter.use(requireWrite);
 
-leavesRouter.post("/upload", upload.single("file"), async (req, res) => {
-  const file = req.file;
-  if (!file) throw new ValidationError("Missing file (multipart field 'file')");
-  if (!/\.(csv|xlsx)$/i.test(file.originalname)) throw new ValidationError("File must be .csv or .xlsx");
-  let table: unknown[][];
-  try {
-    table = await readTable(file.buffer, file.originalname);
-  } catch (e) {
-    throw new ValidationError(`Could not read ${file.originalname}: ${(e as Error).message}`);
-  }
-  const list = leavesFromTable(table);
+leavesRouter.post("/upload", upload, async (req, res) => {
+  const file = req.file!; // readUploadedTable rejects a missing file
+  const list = leavesFromTable(await readUploadedTable(file));
   if (!list.length) throw new ValidationError("Leave file contains no leaves");
   const months = [...new Set(list.map((l) => l.leaveDate.slice(0, 7)))].sort();
   await AppDataSource.transaction(async (m) => {
@@ -38,7 +30,7 @@ leavesRouter.post("/upload", upload.single("file"), async (req, res) => {
 });
 
 leavesRouter.get("/employees", async (req, res) => {
-  const q = String(req.query.q ?? "").trim().replace(/[\\%_]/g, "\\$&");
+  const q = escapeLike(req.query.q);
   if (!q) return void res.json([]);
   const rows = await AppDataSource.getRepository(RosterEmployee).find({
     where: [{ name: ILike(`%${q}%`) }, { employeeId: Like(`${q}%`) }],

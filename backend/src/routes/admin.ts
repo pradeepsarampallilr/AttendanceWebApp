@@ -7,16 +7,15 @@ import { isRole, requireWrite } from "../services/access.js";
 import { logAction } from "../services/audit.js";
 import { NotFoundError } from "../services/process.js";
 import { listSettings, saveSettings } from "../services/settings.js";
+import { escapeLike } from "../services/store.js";
+import { pageParams } from "../services/paging.js";
+import { cleanText } from "../services/text.js";
 import { isEmail, normEmail } from "../services/users.js";
 
 export const adminRouter = Router();
 adminRouter.use(requireWrite);
 
 const users = () => AppDataSource.getRepository(AppUser);
-const page = (q: Record<string, unknown>) => {
-  const pageSize = Math.min(100, Math.max(1, Number(q.pageSize) || 20));
-  return { page: Math.max(1, Number(q.page) || 1), pageSize };
-};
 /** Only a superadmin may create, change or remove a superadmin. */
 const assertMayTouch = (actor: AppRole | undefined, target: AppRole) => {
   if (target === "superadmin" && actor !== "superadmin") throw new ValidationError("Only a superadmin can manage superadmin users");
@@ -24,9 +23,9 @@ const assertMayTouch = (actor: AppRole | undefined, target: AppRole) => {
 
 /** ?q= matches name / email / username, ?role= filters, paged with page / pageSize. */
 adminRouter.get("/users", async (req, res) => {
-  const { page: p, pageSize } = page(req.query);
+  const { page: p, pageSize } = pageParams(req.query, 20);
   const qb = users().createQueryBuilder("u").orderBy("u.role", "ASC").addOrderBy("u.email", "ASC").skip((p - 1) * pageSize).take(pageSize);
-  const q = String(req.query.q ?? "").trim().replace(/[\\%_]/g, "\\$&");
+  const q = escapeLike(req.query.q);
   if (q) qb.andWhere("(u.email ILIKE :q OR u.name ILIKE :q OR u.username ILIKE :q)", { q: `%${q}%` });
   if (isRole(req.query.role)) qb.andWhere("u.role = :role", { role: req.query.role });
   const [items, total] = await qb.getManyAndCount();
@@ -35,16 +34,16 @@ adminRouter.get("/users", async (req, res) => {
 
 /** Add an HR user (or, for a superadmin, a superadmin). Managers and employees come from the roster. */
 adminRouter.post("/users", async (req, res) => {
-  const email = normEmail(String(req.body?.email ?? ""));
+  const email = normEmail(cleanText(req.body?.email, 400));
   if (!isEmail(email)) throw new ValidationError("Enter a valid email address");
   const role: AppRole = req.body?.role === "superadmin" ? "superadmin" : "hr";
   assertMayTouch(req.userRole, role);
-  const username = normEmail(String(req.body?.username ?? "")) || null;
+  const username = normEmail(cleanText(req.body?.username, 100)) || null;
   if (username && /\s/.test(username)) throw new ValidationError("Username must not contain spaces");
   const taken = [email, username].filter((v): v is string => !!v);
   const existing = await users().createQueryBuilder("u").where("u.email IN (:...taken) OR u.username IN (:...taken)", { taken }).getOne();
   if (existing) throw new ValidationError(`${existing.email} already has access as ${existing.role}`);
-  const saved = await users().save(users().create({ email, username, name: String(req.body?.name ?? "").trim().slice(0, 200), role }));
+  const saved = await users().save(users().create({ email, username, name: cleanText(req.body?.name, 200), role }));
   await logAction(req, "add user", "user", `${email} as ${role}`);
   res.status(201).json(saved);
 });
@@ -84,9 +83,9 @@ adminRouter.delete("/users/:email", async (req, res) => {
 
 /** Who did what, newest first: ?q= searches actor / action / detail. */
 adminRouter.get("/audit-logs", async (req, res) => {
-  const { page: p, pageSize } = page(req.query);
+  const { page: p, pageSize } = pageParams(req.query, 20);
   const qb = AppDataSource.getRepository(AuditLog).createQueryBuilder("a").orderBy("a.id", "DESC").skip((p - 1) * pageSize).take(pageSize);
-  const q = String(req.query.q ?? "").trim().replace(/[\\%_]/g, "\\$&");
+  const q = escapeLike(req.query.q);
   if (q) qb.where("(a.actorEmail ILIKE :q OR a.action ILIKE :q OR a.detail ILIKE :q OR a.entity ILIKE :q)", { q: `%${q}%` });
   const [items, total] = await qb.getManyAndCount();
   res.json({ items, total, page: p, pageSize });
