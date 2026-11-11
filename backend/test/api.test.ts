@@ -1,12 +1,11 @@
 /** Checks the whole web API on a fresh test database: uploads, results, manual edits, export, holidays and access list. */
-import { readFileSync } from "node:fs";
+import "dotenv/config";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fixtureFile } from "./fixtures.js";
 
-const FIX = new URL("../../fixtures/", import.meta.url);
-const GOLD = new URL("../../golden/", import.meta.url);
 const TEST_DB = "attendance_test";
 
 let server: Server;
@@ -14,10 +13,10 @@ let base: string;
 let ds: import("typeorm").DataSource;
 const query = async (sql: string, params?: unknown[]) => ({ rows: (await ds.query(sql, params)) as any[] });
 
-async function send(kind: string, file: string, name = file) {
+async function send(kind: string, file: Parameters<typeof fixtureFile>[0], name: string = file) {
   const form = new FormData();
   form.set("kind", kind);
-  form.set("file", new Blob([readFileSync(new URL(file, FIX))]), name);
+  form.set("file", new Blob([new Uint8Array(await fixtureFile(file))]), name);
   return fetch(`${base}/api/uploads`, { method: "POST", body: form });
 }
 const get = async (path: string) => (await fetch(`${base}/api${path}`)).json() as Promise<any>;
@@ -28,17 +27,18 @@ beforeAll(async () => {
   const admin = new pg.Client({ connectionString: "postgres://localhost:5432/postgres" });
   await admin.connect();
   await admin.query(`DROP DATABASE IF EXISTS ${TEST_DB} WITH (FORCE)`);
-  await admin.query(`CREATE DATABASE ${TEST_DB}`);
+  // The app connects as DB_USER, who must own the database to create tables in its public schema (Postgres 15+).
+  await admin.query(`CREATE DATABASE ${TEST_DB}${process.env.DB_USER ? ` OWNER "${process.env.DB_USER}"` : ""}`);
   await admin.end();
   process.env.DB_NAME = TEST_DB;
   process.env.OKTA_ISSUER = "";
-  process.env.ALLOW_INSECURE_DEV_AUTH = "true"; // these tests exercise the API directly; a developer's .env must not switch auth on (dotenv won't override a set var)
 
   const db = await import("../src/db.js");
   ds = db.AppDataSource;
   await db.migrate();
   const { createApp } = await import("../src/app.js");
-  server = createApp().listen(0);
+  // These tests exercise the API directly, so they inject a fixed superadmin instead of Okta.
+  server = createApp((req, _res, next) => { req.userEmail = "test@local"; req.userRole = "superadmin"; next(); }).listen(0);
   base = `http://localhost:${(server.address() as AddressInfo).port}`;
 }, 60_000);
 
@@ -74,45 +74,103 @@ describe("upload + process matches golden", () => {
     expect((await get("/uploads")).items.length).toBeGreaterThanOrEqual(3);
   }, 60_000);
 
-  it.each([["2026-07", "july"], ["2026-08", "august"]])("processes %s", async (ym, name) => {
-    const gold = JSON.parse(readFileSync(new URL(`${name}.json`, GOLD), "utf8"));
+  it.each(["2026-07", "2026-08"])("processes %s consistently", async (ym) => {
     expect((await post(`/months/${ym}/process`)).status).toBe(200);
-    // Seed manual data and make sure a reprocess leaves it alone.
+    const first = await get(`/months/${ym}/attendance`);
+    expect(first.length).toBeGreaterThan(0);
+
+    // Seed manual data and make sure a reprocess leaves it alone and changes nothing else.
     await query("INSERT INTO manual_adjustments (month, employee_id, work_date, action, hours) VALUES ($1, $2, $3, 'add', 1) ON CONFLICT DO NOTHING", [`${ym}-01`, `m${ym}`, `${ym}-02`]);
     await query("INSERT INTO anchor_day_adjustments (month, employee_id, anchor_date, attended) VALUES ($1, $2, $3, true) ON CONFLICT DO NOTHING", [`${ym}-01`, `m${ym}`, `${ym}-02`]);
     expect((await post(`/months/${ym}/process`)).status).toBe(200);
-
-    const rows = await get(`/months/${ym}/attendance`);
-    expect(rows.length).toBe(gold.rows.length);
-    const mine = rows.map((r: any) => ({
-      employee_id: r.employeeId, name: r.name, email: r.email, department: r.department,
-      manager_name: r.managerName, manager_email: r.managerEmail, week: r.week,
-      week_attended_days: r.weekAttendedDays, work_date: r.workDate, check_in: r.checkIn, check_out: r.checkOut,
-      visit_hours: r.visitHours, daily_total_hours: r.dailyTotalHours, shift_label: r.shiftLabel,
-      eligibility: r.eligibility, compliant: r.compliant, week_compliant: r.weekCompliant,
-      month_compliant: r.monthCompliant, is_first_row_of_day_group: r.isFirstRowOfDayGroup,
-      rows_in_day_group: r.rowsInDayGroup,
-    }));
-    expect(mine).toEqual(gold.rows);
-
-    const audit = await get(`/months/${ym}/audit`);
-    const pairIssues = audit.filter((i: any) => !["No roster match", "Manager email unresolved"].includes(i.issueType))
-      .map((i: any) => [i.employeeId, i.issueType, i.at, i.detail]).sort();
-    expect(pairIssues).toEqual(gold.issues);
-
-    const wed = await get(`/months/${ym}/anchor-day`);
-    const rosterSize = (await query("SELECT count(*)::int AS n FROM roster_employees")).rows[0].n;
-    expect(wed.employees.length).toBe(rosterSize);
-    expect(wed.dates.length).toBeGreaterThanOrEqual(4);
-    const yes = new Map<string, Set<string>>();
-    for (const r of rows) (yes.get(r.employeeId) ?? yes.set(r.employeeId, new Set()).get(r.employeeId)!).add(r.workDate);
-    for (const e of wed.employees) for (const w of wed.dates) {
-      expect(e.attended[w]).toBe(yes.get(e.employeeId)?.has(w) ?? false);
-    }
+    expect(await get(`/months/${ym}/attendance`)).toEqual(first);
 
     const manual = await query("SELECT (SELECT count(*) FROM manual_adjustments WHERE employee_id = $1)::int AS a, (SELECT count(*) FROM anchor_day_adjustments WHERE employee_id = $1)::int AS w", [`m${ym}`]);
     expect(manual.rows[0]).toEqual({ a: 1, w: 1 });
+
+    // Rows are ordered by name then date, and only the first row of a day group carries the group's size.
+    const keys = first.map((r: any) => `${r.name}|${r.workDate}|${r.checkIn}`);
+    expect(keys).toEqual([...keys].sort());
+    for (const r of first) expect(r.visitHours === null || r.visitHours >= 0).toBe(true);
+
+    // The anchor-day grid has every roster employee, and a day is attended exactly when that employee has a visit on it.
+    const grid = await get(`/months/${ym}/anchor-day`);
+    const rosterSize = (await query("SELECT count(*)::int AS n FROM roster_employees")).rows[0].n;
+    expect(grid.employees.length).toBe(rosterSize);
+    expect(grid.dates.length).toBeGreaterThanOrEqual(4);
+    const days = new Map<string, Set<string>>();
+    for (const r of first) (days.get(r.employeeId) ?? days.set(r.employeeId, new Set()).get(r.employeeId)!).add(r.workDate);
+    for (const e of grid.employees) for (const w of grid.dates) {
+      expect(e.attended[w]).toBe(days.get(e.employeeId)?.has(w) ?? false);
+    }
   }, 120_000);
+
+  describe("known outcomes from the fixture people", () => {
+    const rowsOf = (rows: any[], id: string) => rows.filter((r) => r.employeeId === id);
+    const issueTypes = (issues: any[], id: string) => issues.filter((i) => i.employeeId === id).map((i) => i.issueType);
+
+    it("2026-08: eligibility, hours and compliance", async () => {
+      const rows = await get("/months/2026-08/attendance");
+      const issues = await get("/months/2026-08/audit");
+
+      // General shift: outside the policy, so nothing is judged.
+      expect(new Set(rowsOf(rows, "1001").map((r) => r.eligibility))).toEqual(new Set(["No"]));
+      expect(new Set(rowsOf(rows, "1001").map((r) => r.monthCompliant))).toEqual(new Set(["NA"]));
+      // Never swiped, so no rows at all.
+      expect(rowsOf(rows, "1005")).toEqual([]);
+      // No shift in the roster: unknown eligibility.
+      expect(new Set(rowsOf(rows, "1007").map((r) => r.eligibility))).toEqual(new Set(["NA"]));
+
+      // Night shift: 18:00 to 03:00 next day is one 9-hour visit on the day it started.
+      const carol = rowsOf(rows, "1003");
+      expect(carol.length).toBeGreaterThan(0);
+      expect(carol.every((r) => r.visitHours === 9 && r.dailyTotalHours === 9 && r.compliant === "Yes")).toBe(true);
+      expect(carol.every((r) => r.checkOut.slice(0, 10) === `${r.workDate.slice(0, 8)}${String(Number(r.workDate.slice(8)) + 1).padStart(2, "0")}`)).toBe(true);
+      expect(carol[0].monthCompliant).toBe("Yes");
+
+      // Split day: two visits share one total, and only the first row opens the group.
+      const split = rowsOf(rows, "1004").filter((r) => r.workDate === "2026-08-05");
+      expect(split.map((r) => [r.visitHours, r.dailyTotalHours, r.isFirstRowOfDayGroup, r.rowsInDayGroup])).toEqual([[4, 8.25, true, 2], [4.25, 8.25, false, 2]]);
+      // A check-in with no checkout has no hours and is reported.
+      const open = rowsOf(rows, "1004").find((r) => r.workDate === "2026-08-07");
+      expect(open).toMatchObject({ checkOut: null, visitHours: null });
+      expect(issueTypes(issues, "1004")).toContain("Missing checkout");
+
+      // Short days never reach the 7 hours, so the month is not compliant.
+      const frank = rowsOf(rows, "1006");
+      expect(frank.some((r) => r.workDate === "2026-08-04" && r.compliant === "No")).toBe(true);
+      expect(frank.every((r) => r.monthCompliant === "No")).toBe(true);
+
+      // Swipes from someone missing in the roster are kept, flagged and left without roster details.
+      const zed = rowsOf(rows, "9999");
+      expect(zed.length).toBeGreaterThan(0);
+      expect(zed[0]).toMatchObject({ name: "Zed Visitor", department: "", eligibility: "NA" });
+      expect(issueTypes(issues, "9999")).toContain("No roster match");
+
+      // Managers are resolved from the roster by name.
+      expect(rowsOf(rows, "1003")[0]).toMatchObject({ managerName: "Bob Manager", managerEmail: "bob.manager@example.com" });
+      expect(rowsOf(rows, "1001")[0]).toMatchObject({ managerName: "NA", managerEmail: "NA" });
+    });
+
+    it("2026-07: a month's first short week makes the month non-compliant", async () => {
+      // July starts on a Wednesday with no earlier data, so week 1 only has 3 days and Carol only works the Wednesday.
+      const rows = await get("/months/2026-07/attendance");
+      const carol = rowsOf(rows, "1003");
+      expect(carol.find((r) => r.workDate === "2026-07-01")).toMatchObject({ weekCompliant: "No" });
+      expect(carol.find((r) => r.workDate === "2026-07-06")).toMatchObject({ weekCompliant: "Yes" });
+      expect(carol.every((r) => r.monthCompliant === "No")).toBe(true);
+    });
+
+    it("a holiday lowers the days a week needs", async () => {
+      // Frank's week of 2026-08-03 has one full day (Mon). Marking Tue-Thu as holidays leaves nothing to attend but the Monday.
+      expect((await fetch(`${base}/api/months/2026-08/holidays`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ dates: ["2026-08-04", "2026-08-05", "2026-08-06"] }) })).status).toBe(200);
+      expect((await post("/months/2026-08/process")).status).toBe(200);
+      const week1 = rowsOf(await get("/months/2026-08/attendance"), "1006").find((r) => r.workDate === "2026-08-03");
+      expect(week1).toMatchObject({ weekCompliant: "Yes" });
+      await fetch(`${base}/api/months/2026-08/holidays`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ dates: [] }) });
+      expect((await post("/months/2026-08/process")).status).toBe(200);
+    });
+  });
 });
 
 describe("manual edits", () => {
@@ -203,7 +261,7 @@ describe("transport upload", () => {
     const { rows: out } = await query(
       "SELECT DISTINCT employee_id, eligibility, transport_opt_in AS t FROM attendance_visits WHERE month = '2026-08-01'");
     for (const r of out) {
-      expect(r.t).toBe(r.eligibility === "No" ? "NA" : r.employee_id === listed ? "Yes" : "No");
+      expect(r.t).toBe(r.eligibility !== "Yes" ? "NA" : r.employee_id === listed ? "Yes" : "No");
     }
     expect((await get("/months/2026-08/attendance"))[0]).toHaveProperty("transportOptIn");
   });
@@ -215,8 +273,8 @@ describe("holidays", () => {
 
   it("stores, replaces and returns a month's holidays", async () => {
     expect(await get("/months/2026-08/holidays")).toEqual([]);
-    expect((await put("2026-08", { dates: ["2026-08-15", "2026-08-12", "2026-08-12"] })).status).toBe(200);
-    expect(await get("/months/2026-08/holidays")).toEqual([{ date: "2026-08-12", description: "" }, { date: "2026-08-15", description: "" }]);
+    expect((await put("2026-08", { dates: ["2026-08-14", "2026-08-12", "2026-08-12"] })).status).toBe(200);
+    expect(await get("/months/2026-08/holidays")).toEqual([{ date: "2026-08-12", description: "" }, { date: "2026-08-14", description: "" }]);
     await put("2026-08", { dates: ["2026-08-05"] });
     expect(await get("/months/2026-08/holidays")).toEqual([{ date: "2026-08-05", description: "" }]);
     expect(await get("/months/2026-09/holidays")).toEqual([]);

@@ -1,9 +1,9 @@
 /** A signed-in manager sees exactly their own subtree: attendance rows, reporting lines and nobody above them. */
-import { readFileSync } from "node:fs";
+import "dotenv/config";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fixtureFile } from "./fixtures.js";
 
-const FIX = new URL("../../fixtures/", import.meta.url);
 const TEST_DB = "attendance_test_manager";
 let ds: import("typeorm").DataSource;
 
@@ -11,21 +11,21 @@ beforeAll(async () => {
   const admin = new pg.Client({ connectionString: "postgres://localhost:5432/postgres" });
   await admin.connect();
   await admin.query(`DROP DATABASE IF EXISTS ${TEST_DB} WITH (FORCE)`);
-  await admin.query(`CREATE DATABASE ${TEST_DB}`);
+  // The app connects as DB_USER, who must own the database to create tables in its public schema (Postgres 15+).
+  await admin.query(`CREATE DATABASE ${TEST_DB}${process.env.DB_USER ? ` OWNER "${process.env.DB_USER}"` : ""}`);
   await admin.end();
   process.env.DB_NAME = TEST_DB;
   process.env.OKTA_ISSUER = "";
-  process.env.ALLOW_INSECURE_DEV_AUTH = "true";
   const db = await import("../src/db.js");
   ds = db.AppDataSource;
   await db.migrate();
   const { createApp } = await import("../src/app.js");
-  const server = createApp().listen(0);
+  const server = createApp((req, _res, next) => { req.userEmail = "test@local"; req.userRole = "superadmin"; next(); }).listen(0);
   const base = `http://localhost:${(server.address() as import("node:net").AddressInfo).port}`;
-  const send = async (kind: string, file: string) => {
+  const send = async (kind: string, file: Parameters<typeof fixtureFile>[0]) => {
     const form = new FormData();
     form.set("kind", kind);
-    form.set("file", new Blob([readFileSync(new URL(file, FIX))]), file);
+    form.set("file", new Blob([new Uint8Array(await fixtureFile(file))]), file);
     return fetch(`${base}/api/uploads`, { method: "POST", body: form });
   };
   await send("roster", "roster.xlsx");

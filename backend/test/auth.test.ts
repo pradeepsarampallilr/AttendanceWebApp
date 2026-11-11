@@ -16,17 +16,11 @@ describe("okta auth middleware", () => {
   const saved = process.env.OKTA_ISSUER;
   afterEach(() => void (saved === undefined ? delete process.env.OKTA_ISSUER : (process.env.OKTA_ISSUER = saved)));
 
-  it("refuses to start without OKTA_ISSUER unless local development opts in explicitly", async () => {
+  it("always refuses to start without OKTA_ISSUER, whatever else is set in the environment", () => {
     delete process.env.OKTA_ISSUER;
-    delete process.env.ALLOW_INSECURE_DEV_AUTH;
     expect(() => oktaAuth()).toThrow(/OKTA_ISSUER must be set/);
-    process.env.ALLOW_INSECURE_DEV_AUTH = "true";
-    const { server, url } = start();
-    expect((await fetch(url)).status).toBe(200);
-    server.close();
-    process.env.NODE_ENV = "production";
-    expect(() => oktaAuth()).toThrow(/OKTA_ISSUER must be set/); // never in production, even with the opt-in
-    process.env.NODE_ENV = "test";
+    process.env.ALLOW_INSECURE_DEV_AUTH = "true"; // the old bypass flag must have no effect
+    expect(() => oktaAuth()).toThrow(/OKTA_ISSUER must be set/);
     delete process.env.ALLOW_INSECURE_DEV_AUTH;
   });
 

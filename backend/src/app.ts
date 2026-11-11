@@ -41,7 +41,8 @@ function rateLimit(perMinute: number): RequestHandler {
   };
 }
 
-export function createApp() {
+/** `auth` is for tests to inject a fixed user; production always uses Okta (nothing in the environment can swap it). */
+export function createApp(auth: RequestHandler = oktaAuth()) {
   const app = express();
   app.disable("x-powered-by");
   app.use(securityHeaders);
@@ -52,7 +53,7 @@ export function createApp() {
   app.use("/api", rateLimit(Number(process.env.RATE_LIMIT_PER_MIN) || 600));
 
   app.get("/api/health", (_req, res) => void res.json({ ok: true }));
-  app.use("/api", oktaAuth());
+  app.use("/api", auth);
   app.get("/api/me", async (req, res) => void res.json({ email: req.userEmail ?? null, role: req.userRole ?? null, employeeId: await myEmployeeId(req) }));
   /** Reporting lines the caller may see (manager above employee, at any depth), with the manager's roster name. */
   app.get("/api/team", async (req, res) => void res.json(await teamLines(req)));

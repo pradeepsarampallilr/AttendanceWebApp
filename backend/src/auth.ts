@@ -18,17 +18,7 @@ declare module "express-serve-static-core" {
 
 export function oktaAuth(): RequestHandler {
   const issuer = process.env.OKTA_ISSUER?.replace(/\/$/, "");
-  if (!issuer) {
-    // Fail closed: running without Okta needs an explicit opt-in, and is never allowed in production.
-    if (process.env.NODE_ENV === "production" || process.env.ALLOW_INSECURE_DEV_AUTH !== "true")
-      throw new Error("OKTA_ISSUER must be set: refusing to start with authentication disabled (local development can opt in with ALLOW_INSECURE_DEV_AUTH=true).");
-    console.warn("Okta auth DISABLED by ALLOW_INSECURE_DEV_AUTH: every request acts as a local superadmin (development only).");
-    return (req, _res, next) => {
-      req.userEmail = "dev@local";
-      req.userRole = "superadmin";
-      next();
-    };
-  }
+  if (!issuer) throw new Error("OKTA_ISSUER must be set: refusing to start without authentication.");
   const orgServer = !new URL(issuer).pathname.includes("/oauth2");
   // The SPA's client id (same value as the frontend's VITE_OKTA_CLIENT_ID). It is the ID token's audience on the org server,
   // and on a custom server it must match the access token's `cid`, so tokens issued to other apps in the org are refused.
