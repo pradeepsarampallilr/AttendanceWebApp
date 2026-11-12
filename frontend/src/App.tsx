@@ -31,7 +31,7 @@ export default function App() {
   const [params, setParams] = useSearchParams();
   const months = useAsync(api.months, []);
   const { pathname } = useLocation();
-  // Fetched again on every page change, so a new anchor day shows up right after it is saved.
+ 
   const anchorDay = useAsync(api.rules, [pathname]).data?.anchorDay ?? 'Anchor day';
   const list = months.data ?? [];
   const selected = params.get('month') ?? (list.length ? toYm(list[0].month) : '');

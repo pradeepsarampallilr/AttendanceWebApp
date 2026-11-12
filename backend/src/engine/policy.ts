@@ -8,21 +8,20 @@ import type { ShiftWindow } from "./types.js";
 
 export type Tri = "Yes" | "No" | "NA";
 
-/** The general shift starts at 9:00 AM and ends between 6:00 PM and 6:30 PM (the roster writes it as 6:30 PM). */
+// 9:00 am to 6:00-6:30 pm
 export const isGeneralShift = (s: ShiftWindow) => s.startMinutes === 9 * 60 && s.endMinutes >= 18 * 60 && s.endMinutes <= 18 * 60 + 30;
 
-/** General shift: not covered by the policy (No). No shift in the roster: unknown (NA). Anything else: covered (Yes). */
+// general shift or anonymous shift -> No / else -> Yes 
 export const evaluateEligibility = (shift: ShiftWindow | null): Tri => (!shift ? "NA" : isGeneralShift(shift) ? "No" : "Yes");
 
+// compliance check: if not eligible or no hours, then NA; else Yes if hours >= 7, else No
 export const evaluateCompliance = (eligibility: string, dailyHours: number | null): Tri =>
   eligibility !== "Yes" || dailyHours === null ? "NA" : dailyHours >= settings.compliantMinHours ? "Yes" : "No";
 
 export interface WeekResult {
   weekStart: DateStr;
-  /** Office days needed: min(3, 3 - off weekdays), and never more than the working weekdays left in the data. */
   required: number;
   attended: number;
-  /** The anchor day: attended, missed, or not required (holiday, leave, or outside the data window). */
   anchor: "present" | "absent" | "off";
   anchorOk: boolean;
   status: Tri;

@@ -17,15 +17,18 @@ declare module "express-serve-static-core" {
 }
 
 export function oktaAuth(): RequestHandler {
+  
   const issuer = process.env.OKTA_ISSUER?.replace(/\/$/, "");
   if (!issuer) throw new Error("OKTA_ISSUER must be set: refusing to start without authentication.");
+  
   const orgServer = !new URL(issuer).pathname.includes("/oauth2");
-  // The SPA's client id (same value as the frontend's VITE_OKTA_CLIENT_ID). It is the ID token's audience on the org server,
-  // and on a custom server it must match the access token's `cid`, so tokens issued to other apps in the org are refused.
+
   const clientId = process.env.OKTA_CLIENT_ID?.trim();
   if (!clientId) throw new Error("OKTA_CLIENT_ID (the SPA's client id, same as the frontend's VITE_OKTA_CLIENT_ID) is required.");
+  
   const audience = orgServer ? clientId : (process.env.OKTA_AUDIENCE ?? "api://default");
-  console.log(`Okta auth ENABLED: ${orgServer ? "org server, verifying ID tokens" : "verifying access tokens"} (issuer=${issuer}, audience=${audience})`);
+  // console.log(`Okta auth ENABLED: ${orgServer ? "org server, verifying ID tokens" : "verifying access tokens"} (issuer=${issuer}, audience=${audience})`);
+  
   const identityClaim = process.env.OKTA_IDENTITY_CLAIM?.trim();
   if (identityClaim && !["preferred_username", "email", "sub"].includes(identityClaim)) {
     throw new Error(`OKTA_IDENTITY_CLAIM must be "preferred_username", "email" or "sub" (got "${identityClaim}"), or leave it empty.`);
@@ -50,7 +53,7 @@ export function oktaAuth(): RequestHandler {
       return void res.status(401).json({ error: "Invalid or expired token", reason: "wrong_client" });
     }
 
-    // Identity claims must be short, printable strings (a NUL byte or a huge value never reaches the database).
+    // Identity claims must be short, printable strings (a NULL byte or a huge value never reaches the database).
     const norm = (v: unknown) => (typeof v === "string" && v.length <= 320 && !/[\u0000-\u001f\u007f]/.test(v.trim()) ? v.trim().toLowerCase() : "");
     const raw = identityClaim
       ? [payload[identityClaim]]

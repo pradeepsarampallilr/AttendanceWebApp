@@ -16,7 +16,6 @@ export const adminRouter = Router();
 adminRouter.use(requireWrite);
 
 const users = () => AppDataSource.getRepository(AppUser);
-/** Only a superadmin may create, change or remove a superadmin. */
 const assertMayTouch = (actor: AppRole | undefined, target: AppRole) => {
   if (target === "superadmin" && actor !== "superadmin") throw new ValidationError("Only a superadmin can manage superadmin users");
 };

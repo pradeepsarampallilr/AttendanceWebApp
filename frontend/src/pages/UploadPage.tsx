@@ -28,6 +28,7 @@ const badge = (ok: boolean) =>
 
 export default function UploadPage({ onChanged, month }: { onChanged: () => void; month: string }) {
   const day = useAnchorDay();
+  const limits = useAsync(() => api.limits(), []).data;
   const [historyPage, setHistoryPage] = useState(0);
   const uploads = useAsync(() => api.uploads(historyPage + 1, HISTORY_PAGE), [historyPage]);
   const months = useAsync(api.months, []);
@@ -86,9 +87,9 @@ export default function UploadPage({ onChanged, month }: { onChanged: () => void
     <div className="space-y-6">
       <PageHeader icon={<DashboardIcon className="h-5 w-5" />} title="Dashboard" sub="Upload the roster, monthly check-ins, transport and leaves, then process the month." />
       <section className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <UploadCard title="Employee Details" hint="Employee list (replaces the current roster)." template="roster" upload={(f) => sendKind('roster', f)} onDone={refresh} />
-        <UploadCard title="Monthly Check In/Out's" hint="Badge events for one month." template="movement" upload={(f) => sendKind('movement', f)} onDone={refresh} />
-        <UploadCard title="Transport Details" hint="Transport details (replaces the current list)." template="transport" upload={(f) => sendKind('transport', f)} onDone={refresh} />
+        <UploadCard title="Employee Details" hint="Employee list (replaces the current roster)." template="roster" upload={(f) => sendKind('roster', f)} onDone={refresh} maxMb={limits?.maxUploadMb} />
+        <UploadCard title="Monthly Check In/Out's" hint="Badge events for one month." template="movement" upload={(f) => sendKind('movement', f)} onDone={refresh} maxMb={limits?.maxUploadMb} />
+        <UploadCard title="Transport Details" hint="Transport details (replaces the current list)." template="transport" upload={(f) => sendKind('transport', f)} onDone={refresh} maxMb={limits?.maxUploadMb} />
         <UploadCard title="Leaves Details" hint="Row: Employee ID, Leave Date (optional Name, Description). Adds to existing leaves."
           template="leaves"
           upload={async (f) => {
@@ -96,6 +97,7 @@ export default function UploadPage({ onChanged, month }: { onChanged: () => void
             return <>Uploaded <b>{r.filename}</b>: {r.leaves} leave days · {r.employees} employees ({r.months.join(', ')})</>;
           }}
           onDone={refresh}
+          maxMb={limits?.maxLeavesUploadMb}
         />
       </section>
 

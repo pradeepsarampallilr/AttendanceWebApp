@@ -23,14 +23,12 @@ export class WeeklyCompliance {
   @Column({ type: "int" })
   week!: number;
 
-  /** Office days needed that week: min(3, 3 - holidays - leaves). */
   @Column({ type: "int" })
   required!: number;
 
   @Column({ type: "int" })
   attended!: number;
 
-  /** The anchor day: present, absent, or off (holiday / leave / outside the data). */
   @Column({ type: "text" })
   anchor!: "present" | "absent" | "off";
 

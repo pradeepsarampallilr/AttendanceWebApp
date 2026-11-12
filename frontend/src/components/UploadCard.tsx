@@ -16,12 +16,15 @@ export default function UploadCard({
   template,
   upload,
   onDone,
+  maxMb,
 }: {
   title: string;
   hint: string;
   template: string;
   upload: (file: File) => Promise<ReactNode>;
   onDone: () => void;
+  /** Largest file the server accepts; a bigger one is refused here instead of being sent. Unknown until loaded. */
+  maxMb?: number;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [ask, modal] = useConfirm();
@@ -52,6 +55,12 @@ export default function UploadCard({
 
   const confirmSend = (file: File | undefined) => {
     if (!file) return;
+    if (maxMb && file.size > maxMb * 1024 * 1024) {
+      setResult(null);
+      setError(`${file.name} is ${(file.size / 1024 / 1024).toFixed(1)} MB; the limit is ${maxMb} MB.`);
+      if (input.current) input.current.value = '';
+      return;
+    }
     ask({ title: `Upload ${title}?`, confirmLabel: 'Upload', message: `Upload ${file.name}? It is added to the data used for processing.` }, () => send(file));
     if (input.current) input.current.value = '';
   };

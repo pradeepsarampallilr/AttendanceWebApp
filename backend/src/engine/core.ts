@@ -7,17 +7,11 @@ export type DateStr = string;
 
 export const HOUR_MS = 3_600_000;
 
-/** The tunable rules. HR / superadmin change them on the Configuration page; the saved values are loaded into `settings` at start-up. */
 export interface Settings {
-  /** Hours in the office that make a day count as a full office day. */
   compliantMinHours: number;
-  /** Office days required in a full week. */
   weeklyOfficeDays: number;
-  /** The anchor day as a weekday() index (Monday = 0, Wednesday = 2 by default). */
   anchorWeekday: number;
-  /** Minutes around a shift's start (check-in) and end (checkout) when assigning a swipe to a work day. */
   dayAttributionBufferMin: number;
-  /** Longest gap, in hours, between a check-in and the checkout it pairs with. */
   maxShiftHours: number;
 }
 export const DEFAULT_SETTINGS: Readonly<Settings> = {
@@ -34,7 +28,7 @@ const utc = (date: DateStr) => {
 export const mkDate = (y: number, m: number, d: number): DateStr => `${y}-${pad(m)}-${pad(d)}`;
 export const mkDateTime = (date: DateStr, h: number, m: number, s: number) => new Date(utc(date) + ((h * 60 + m) * 60 + s) * 1000);
 export const dateOf = (dt: Date): DateStr => mkDate(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
-export const addDays = (date: DateStr, n: number): DateStr => dateOf(new Date(utc(date) + n * 86_400_000));
+export const addDays = (date: DateStr, n: number): DateStr => dateOf(new Date(utc(date) + n * 86_400_000)); // 86,400,000 ms in a day
 export const daysInMonth = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate();
 
 /** Monday = 0 ... Sunday = 6. */
@@ -55,14 +49,13 @@ export const round2 = (x: number) => Math.round(x * 100) / 100;
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-export const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
-  "August", "September", "October", "November", "December"];
+export const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July","August", "September", "October", "November", "December"];
 
-/** '05-Aug-2026' */
+/** returns date of form '05-Aug-2026' */
 export const fmtDate = (date: DateStr) => `${date.slice(8, 10)}-${MONTHS[Number(date.slice(5, 7)) - 1]}-${date.slice(0, 4)}`;
 export const fmtWeekday = (date: DateStr) => DAYS[weekday(date)];
 /** Name of the configured anchor day ("Wednesday", "Thursday", ...). */
 export const anchorDayName = () => DAYS[settings.anchorWeekday];
-
+  
 /** '2026-08-05 15:57:00' */
 export const fmtDateTime = (dt: Date) => `${dateOf(dt)} ${dt.toISOString().slice(11, 19)}`;

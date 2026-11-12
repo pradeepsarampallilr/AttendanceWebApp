@@ -33,6 +33,11 @@ export interface Page<T> {
   pageSize: number;
 }
 
+export interface UploadLimits {
+  maxUploadMb: number;
+  maxLeavesUploadMb: number;
+}
+
 export interface Holiday {
   date: string;
   description: string;
@@ -203,6 +208,7 @@ export const api = {
   team: () => request<TeamLine[]>('/api/team'),
   uploads: (page: number, pageSize: number) => request<Page<UploadRow>>(`/api/uploads?${qs({ page, pageSize })}`),
   rules: () => request<RulesDoc>('/api/rules'),
+  limits: () => request<UploadLimits>('/api/limits'),
   weekly: (ym: string) => request<WeeklyRow[]>(`/api/months/${ym}/weekly`),
   months: () => request<MonthRow[]>('/api/months'),
   upload: (kind: UploadKind, file: File) => {

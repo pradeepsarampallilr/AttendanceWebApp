@@ -3,13 +3,13 @@ import { Router } from "express";
 import { ILike, Like } from "typeorm";
 import { AppDataSource } from "../db.js";
 import { ValidationError, leavesFromTable, readUploadedTable } from "../io/tables.js";
-import { singleFile } from "../io/upload.js";
+import { singleFile, uploadLimits } from "../io/upload.js";
 import { Leave, RosterEmployee, Upload } from "../models/index.js";
 import { requireWrite } from "../services/access.js";
 import { logAction } from "../services/audit.js";
 import { escapeLike } from "../services/store.js";
 
-const upload = singleFile(10 * 1024 * 1024);
+const upload = singleFile(uploadLimits().leaves);
 export const leavesRouter = Router();
 leavesRouter.use(requireWrite);
 

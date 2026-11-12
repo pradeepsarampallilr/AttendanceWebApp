@@ -23,7 +23,7 @@ export function pairSwipeEvents(employeeId: string, events: SwipeEvent[]): { vis
       continue;
     }
     if (!pending) {
-      issues.push({ employeeId, issueType: "Orphan checkout", at: ev.at,
+      issues.push({ employeeId, issueType: "Missing checkin", at: ev.at,
         detail: `Checkout at ${fmtDateTime(ev.at)} has no preceding unmatched check-in.` });
       continue;
     }

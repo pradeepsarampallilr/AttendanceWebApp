@@ -6,7 +6,7 @@ import {
   ValidationError, assertMovementHeader, assertRosterHeader, eventsFromMovementTable,
   fallbackNamesFromTable, readUploadedTable, rosterFromTable, transportFromTable,
 } from "../io/tables.js";
-import { singleFile } from "../io/upload.js";
+import { singleFile, uploadLimits } from "../io/upload.js";
 import { buildReportingLines } from "../engine/hierarchy.js";
 import { pageParams } from "../services/paging.js";
 import { logAction } from "../services/audit.js";
@@ -15,7 +15,8 @@ import { syncRosterUsers } from "../services/users.js";
 import { ReportingLine, RosterEmployee, TransportEmployee, Upload } from "../models/index.js";
 import { insertChunked, insertSwipeEvents, monthStart, refreshTransportOptIn } from "../services/store.js";
 
-const upload = singleFile(50 * 1024 * 1024);
+/** Files are held in memory, so MAX_UPLOAD_MB should fit the server's RAM. */
+const upload = singleFile(uploadLimits().data);
 export const uploadsRouter = Router();
 
 uploadsRouter.use(requireWrite);

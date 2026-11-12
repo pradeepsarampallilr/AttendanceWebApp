@@ -22,7 +22,6 @@ export class RosterEmployee {
   @Column({ name: "manager_email", type: "text", default: "" })
   managerEmail!: string;
 
-  /** NULL = unassigned. */
   @Column({ name: "shift_label", type: "text", nullable: true })
   shiftLabel!: string | null;
 

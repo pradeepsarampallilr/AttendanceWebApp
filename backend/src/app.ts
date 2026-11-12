@@ -6,6 +6,7 @@ import path from "node:path";
 import express, { type ErrorRequestHandler, type RequestHandler } from "express";
 import { oktaAuth } from "./auth.js";
 import { ValidationError, buildTemplate, isTemplateKind } from "./io/tables.js";
+import { uploadLimits } from "./io/upload.js";
 import { adminRouter } from "./routes/admin.js";
 import { leavesRouter } from "./routes/leaves.js";
 import { monthsRouter } from "./routes/months.js";
@@ -15,19 +16,21 @@ import cors from "cors";
 import { getRules } from "./engine/rules.js";
 import { myEmployeeId, requireWrite, teamLines } from "./services/access.js";
 
+// securityHeaders for every response
 const securityHeaders: RequestHandler = (_req, res, next) => {
   res.set({
-    "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "DENY",
-    "Referrer-Policy": "no-referrer",
-    "Strict-Transport-Security": "max-age=15552000; includeSubDomains",
-    "Cross-Origin-Opener-Policy": "same-origin",
-    "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.okta.com https://*.oktapreview.com; frame-ancestors 'none'; base-uri 'self'",
+    "X-Content-Type-Options": "nosniff", // mime type not guessed by the browser
+    "X-Frame-Options": "DENY", // no embedding in iframes
+    "Referrer-Policy": "no-referrer", // no referrer header sent
+    "Strict-Transport-Security": "max-age=15552000; includeSubDomains", // 180 days, force HTTPS
+    "Cross-Origin-Opener-Policy": "same-origin", // no cross-origin window access
+    "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.okta.com https://*.oktapreview.com; frame-ancestors 'none'; base-uri 'self'", // no external scripts, images only from self or data:, no embedding in iframes, no base tag
   });
   next();
 };
 
-/** Fixed-window request cap per client address (in memory, so per server process). */
+
+// a small in-memory rate limiter, per IP address, for all /api routes (including /api/health)
 function rateLimit(perMinute: number): RequestHandler {
   const hits = new Map<string, { n: number; reset: number }>();
   return (req, res, next) => {
@@ -41,13 +44,20 @@ function rateLimit(perMinute: number): RequestHandler {
   };
 }
 
-/** `auth` is for tests to inject a fixed user; production always uses Okta (nothing in the environment can swap it). */
+
 export function createApp(auth: RequestHandler = oktaAuth()) {
+//   setInterval(() => {
+//   const mem = process.memoryUsage();
+//   const cpu = process.cpuUsage();
+//   console.log(`RSS: ${(mem.rss / 1024 / 1024).toFixed(2)} MB | Heap Used: ${(mem.heapUsed / 1024 / 1024).toFixed(2)} MB`);
+//   console.log(`CPU User: ${cpu.user} µs | System: ${cpu.system} µs`);
+// }, 5000);
+
   const app = express();
   app.disable("x-powered-by");
   app.use(securityHeaders);
   app.use(express.json({ limit: "1mb" }));
-  // Browsers on other origins are refused unless listed in CORS_ORIGIN (comma separated). The built site is same-origin.
+
   const origins = (process.env.CORS_ORIGIN ?? "").split(",").map((o) => o.trim()).filter(Boolean);
   app.use(cors({ origin: origins.length ? origins : false }));
   app.use("/api", rateLimit(Number(process.env.RATE_LIMIT_PER_MIN) || 600));
@@ -55,8 +65,9 @@ export function createApp(auth: RequestHandler = oktaAuth()) {
   app.get("/api/health", (_req, res) => void res.json({ ok: true }));
   app.use("/api", auth);
   app.get("/api/me", async (req, res) => void res.json({ email: req.userEmail ?? null, role: req.userRole ?? null, employeeId: await myEmployeeId(req) }));
-  /** Reporting lines the caller may see (manager above employee, at any depth), with the manager's roster name. */
   app.get("/api/team", async (req, res) => void res.json(await teamLines(req)));
+  /** Largest upload per file type in MB, so the page can refuse an oversize file before sending it. */
+  app.get("/api/limits", (_req, res) => { const l = uploadLimits(); res.json({ maxUploadMb: l.data / 1024 / 1024, maxLeavesUploadMb: l.leaves / 1024 / 1024 }); });
   app.get("/api/rules", (_req, res) => void res.json(getRules()));
   app.get("/api/templates/:kind", requireWrite, async (req, res) => {
     const kind = String(req.params.kind).replace(/\.xlsx$/i, "");

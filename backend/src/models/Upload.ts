@@ -15,7 +15,6 @@ export class Upload {
   @Column({ type: "text" })
   filename!: string;
 
-  /** First day of the month (movement uploads only). */
   @Column({ type: "date", nullable: true })
   month!: string | null;
 
